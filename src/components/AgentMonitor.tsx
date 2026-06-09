@@ -136,7 +136,15 @@ export default function AgentMonitor({
           failSimulate: currentStep.function === 'failover_database' && forceFailStep3
         })
       });
-      const data = await res.json();
+      
+      let data: any = { success: false, latency: 2, error: 'Connection error during orchestration.' };
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        data.error = `REST microservice error (HTTP ${res.status}): non-JSON payload.`;
+      }
+
       executionDuration = data.latency;
       stepSuccess = data.success;
       stepOutput = data.output || '';

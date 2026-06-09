@@ -53,6 +53,18 @@ export default function App() {
   const [reportLoading, setReportLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  // Helper to safely parse JSON response and avoid HTML fallback unhandled rejections
+  const safeFetchJson = async (res: Response) => {
+    if (!res.ok) {
+      throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
+    }
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error(`Response content-type is not JSON (received: ${contentType})`);
+    }
+    return res.json();
+  };
+
   // Initial Seed Load
   useEffect(() => {
     fetchInitialTelemetry();
@@ -71,7 +83,7 @@ export default function App() {
     setErrorMessage('');
     try {
       const rbRes = await fetch('/api/runbooks');
-      const rbs = await rbRes.json();
+      const rbs = await safeFetchJson(rbRes);
       setRunbooks(rbs);
       if (rbs.length > 0) {
         setSelectedRunbook(rbs[0]);
@@ -79,8 +91,8 @@ export default function App() {
 
       await fetchDrillsAndAudits();
       await fetchGeneralMetrics();
-    } catch (err) {
-      setErrorMessage('Failed to connect to backend microservices.');
+    } catch (err: any) {
+      setErrorMessage(`Failed to connect to backend microservices: ${err?.message || err}`);
     } finally {
       setGlobalLoading(false);
     }
@@ -89,7 +101,7 @@ export default function App() {
   const fetchDrillsAndAudits = async () => {
     try {
       const drillRes = await fetch('/api/drills');
-      const drs = await drillRes.json();
+      const drs = await safeFetchJson(drillRes);
       setDrills(drs);
       
       const runningDrill = drs.find((d: Drill) => d.status === 'RUNNING');
@@ -100,7 +112,7 @@ export default function App() {
       }
 
       const auditRes = await fetch('/api/audit-trail');
-      const audits = await auditRes.json();
+      const audits = await safeFetchJson(auditRes);
       setAuditTrail(audits);
     } catch (err) {
       console.error('Failed to update log state', err);
@@ -110,7 +122,7 @@ export default function App() {
   const fetchGeneralMetrics = async () => {
     try {
       const metRes = await fetch('/api/system/metrics');
-      const data = await metRes.json();
+      const data = await safeFetchJson(metRes);
       setSystemMetrics(data);
     } catch (err) {
       console.error(err);
@@ -122,7 +134,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/drills/${activeDrill.id}`);
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeFetchJson(res);
         setActiveDrill(data);
         if (data.status !== 'RUNNING') {
           // Drill finalized, reload checks
@@ -147,11 +159,11 @@ export default function App() {
     });
     
     if (!res.ok) {
-      const errData = await res.json();
+      const errData = await safeFetchJson(res).catch(() => ({ error: 'Failed to parse' }));
       throw new Error(errData.error || 'Failed to parse');
     }
 
-    const data = await res.json();
+    const data = await safeFetchJson(res);
     setRunbooks((prev) => [data, ...prev]);
     setSelectedRunbook(data);
     fetchDrillsAndAudits();
@@ -172,12 +184,12 @@ export default function App() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
+        const err = await safeFetchJson(res).catch(() => ({ error: 'Concurrent Drill limit exceeded.' }));
         setErrorMessage(err.error || 'Concurrent Drill limit exceeded.');
         return;
       }
 
-      const drill = await res.json();
+      const drill = await safeFetchJson(res);
       setActiveDrill(drill);
       setActiveTab('agent');
       fetchDrillsAndAudits();
@@ -223,7 +235,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ drillId, user: currentUser })
       });
-      const data = await res.json();
+      const data = await safeFetchJson(res);
       setActiveReport(data.report);
     } catch (err) {
       console.error(err);

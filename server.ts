@@ -638,6 +638,21 @@ app.post('/api/system/simulate-rate-limit', (req, res) => {
   res.json({ message: 'Simulated API rate-limiting burst. Node security triggers tripped.' });
 });
 
+// Express global error handling middleware
+app.use((err: any, req: Request, res: Response, next: any) => {
+  console.error('[EXPRESS ERROR]:', err);
+  res.status(500).json({ error: err.message || 'Internal Server Error' });
+});
+
+// Process-wide uncaught exception listener to prevent silent container exiting
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION]:', reason, 'at:', promise);
+});
+
 // Server boot / Vite development initialization
 const initServer = async () => {
   if (process.env.NODE_ENV !== 'production') {
