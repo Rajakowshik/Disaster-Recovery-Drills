@@ -156,7 +156,9 @@ export default function AgentMonitor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           toolName: currentStep.function,
-          failSimulate: currentStep.function === 'failover_database' && forceFailStep3
+          failSimulate: currentStep.function === 'failover_database' && forceFailStep3,
+          drillId: drill.id,
+          stepId: currentStep.id
         })
       });
       

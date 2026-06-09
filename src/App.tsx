@@ -165,7 +165,7 @@ export default function App() {
   };
 
   const syncActiveDrillState = async () => {
-    if (!activeDrill) return;
+    if (!activeDrill || activeDrill.status === 'RUNNING') return;
     try {
       const res = await fetch(`/api/drills/${activeDrill.id}`);
       if (res.ok) {
