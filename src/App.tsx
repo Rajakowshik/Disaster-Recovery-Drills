@@ -55,14 +55,38 @@ export default function App() {
 
   // Helper to safely parse JSON response and avoid HTML fallback unhandled rejections
   const safeFetchJson = async (res: Response) => {
+    const text = await res.text().catch(() => '');
+    const cleanText = text.trim();
+
     if (!res.ok) {
+      try {
+        if (cleanText && !cleanText.startsWith('<')) {
+          const parsed = JSON.parse(cleanText);
+          if (parsed && parsed.error) {
+            throw new Error(parsed.error);
+          }
+        }
+      } catch (e: any) {
+        if (e.message && !e.message.includes('HTTP Error')) {
+          throw e;
+        }
+      }
       throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
     }
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.includes('application/json')) {
-      throw new Error(`Response content-type is not JSON (received: ${contentType})`);
+
+    if (cleanText.startsWith('<')) {
+      throw new Error(`Expected JSON response, but received HTML content instead. The server might still be booting up.`);
     }
-    return res.json();
+
+    if (!cleanText) {
+      return {};
+    }
+
+    try {
+      return JSON.parse(cleanText);
+    } catch (parseError: any) {
+      throw new Error(`Failed to parse JSON response: ${parseError.message}`);
+    }
   };
 
   // Initial Seed Load

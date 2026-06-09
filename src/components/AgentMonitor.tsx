@@ -137,10 +137,16 @@ export default function AgentMonitor({
         })
       });
       
-      let data: any = { success: false, latency: 2, error: 'Connection error during orchestration.' };
-      const contentType = res.headers.get('content-type') || '';
-      if (res.ok && contentType.includes('application/json')) {
-        data = await res.json();
+      let data: any = { success: false, latency: 2, error: 'Connection error during orchestration.', logs: [] };
+      const text = await res.text().catch(() => '');
+      const cleanText = text.trim();
+      
+      if (res.ok && cleanText && !cleanText.startsWith('<')) {
+        try {
+          data = JSON.parse(cleanText);
+        } catch {
+          data.error = `REST microservice error (HTTP ${res.status}): non-JSON payload.`;
+        }
       } else {
         data.error = `REST microservice error (HTTP ${res.status}): non-JSON payload.`;
       }
@@ -150,8 +156,8 @@ export default function AgentMonitor({
       stepOutput = data.output || '';
       stepError = data.error || '';
       
-      // Inject tool logs
-      data.logs.forEach((l: string) => appendLog(l));
+      // Inject tool logs safely
+      (data.logs || []).forEach((l: string) => appendLog(l));
     } catch {
       executionDuration = 3;
       stepSuccess = true; // Fallback
