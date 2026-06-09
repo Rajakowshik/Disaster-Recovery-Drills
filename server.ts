@@ -146,7 +146,7 @@ let rateLimitCounter: Record<string, { count: number; expires: number }> = {};
 const checkRateLimit = (ip: string, scenario: 'api' | 'auth' | 'agent'): boolean => {
   const now = Date.now();
   const limitKey = `${ip}:${scenario}`;
-  const limitMax = scenario === 'auth' ? 5 : scenario === 'agent' ? 10 : 30; // Strict limit: 5 requests for auth
+  const limitMax = scenario === 'auth' ? 100 : scenario === 'agent' ? 150 : 500; // Safe threshold for live polling
   
   if (!rateLimitCounter[limitKey] || rateLimitCounter[limitKey].expires < now) {
     rateLimitCounter[limitKey] = { count: 1, expires: now + 30000 }; // 30 second window
