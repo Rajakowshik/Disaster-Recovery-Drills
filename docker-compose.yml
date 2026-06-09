@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # Main Full-stack App Container
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dr-drill-agent:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://sre_admin:SecureAuditPass99@db:5432/dr_drill_db
+      - REDIS_URL=redis://redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on:
+      - db
+      - redis
+    restart: always
+
+  # Production PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=sre_admin
+      - POSTGRES_PASSWORD=SecureAuditPass99
+      - POSTGRES_DB=dr_drill_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sre_admin -d dr_drill_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  # Redis Layer for Rate Limiting & Caching
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass RedisSecureLimitP@ss
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    restart: always
+
+  # Prometheus Monitoring SCRAPER
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+    restart: always
+
+  # Grafana Dashboard Visualization Panel
+  grafana:
+    image: grafana/grafana:10.0.0
+    ports:
+      - "3100:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=sre_grafana_pass
+    restart: always
+
+volumes:
+  pgdata:
+  redisdata:
