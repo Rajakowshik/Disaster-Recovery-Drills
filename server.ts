@@ -10,6 +10,13 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import { exec } from 'child_process';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import multer from 'multer';
+import mammoth from 'mammoth';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdf = require('pdf-parse');
 import { 
   Runbook, 
   RunbookStep, 
@@ -34,13 +41,16 @@ app.use(express.json());
 // Resilient SQLite / JSON Database Engine setup
 let sqlite3: any = null;
 let db: any = null;
-let useSQLite = true;
+let useSQLite = false;
 
 const DB_PATH = path.join(process.cwd(), 'dr_agent.db');
 const JSON_RUNBOOKS_PATH = path.join(process.cwd(), 'runbooks.db.json');
 const JSON_DRILLS_PATH = path.join(process.cwd(), 'drills.db.json');
 const JSON_COMPLIANCE_PATH = path.join(process.cwd(), 'compliance_reports.db.json');
 const JSON_AUDIT_PATH = path.join(process.cwd(), 'audit_trail.db.json');
+const JSON_USERS_PATH = path.join(process.cwd(), 'users.db.json');
+const JSON_DOCUMENTS_PATH = path.join(process.cwd(), 'documents.db.json');
+const JWT_SECRET = process.env.JWT_SECRET || 'dr-drill-secret-jwt-key-2026';
 
 // Promise-based wrappers for SQLite/JSON operations
 const dbRun = (sql: string, params: any[] = []): Promise<any> => {
@@ -138,6 +148,47 @@ const dbRun = (sql: string, params: any[] = []): Promise<any> => {
           list.push(item);
           fs.writeFileSync(JSON_AUDIT_PATH, JSON.stringify(list, null, 2));
           resolve({ changes: 1, lastID: item.id });
+        } else if (sqlClean.startsWith('INSERT INTO users')) {
+          const list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
+          const item = {
+            id: params[0],
+            username: params[1],
+            email: params[2],
+            passwordHash: params[3],
+            role: params[4],
+            createdAt: params[5]
+          };
+          list.push(item);
+          fs.writeFileSync(JSON_USERS_PATH, JSON.stringify(list, null, 2));
+          resolve({ changes: 1, lastID: item.id });
+        } else if (sqlClean.startsWith('UPDATE users SET')) {
+          const list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
+          const idx = list.findIndex((x: any) => x.id === params[3]);
+          if (idx !== -1) {
+            list[idx].role = params[0];
+            list[idx].username = params[1];
+            list[idx].email = params[2];
+            fs.writeFileSync(JSON_USERS_PATH, JSON.stringify(list, null, 2));
+          }
+          resolve({ changes: 1 });
+        } else if (sqlClean.startsWith('DELETE FROM users WHERE id = ?')) {
+          let list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
+          list = list.filter((x: any) => x.id !== params[0]);
+          fs.writeFileSync(JSON_USERS_PATH, JSON.stringify(list, null, 2));
+          resolve({ changes: 1 });
+        } else if (sqlClean.startsWith('INSERT INTO documents')) {
+          const list = JSON.parse(fs.readFileSync(JSON_DOCUMENTS_PATH, 'utf8'));
+          const item = {
+            id: params[0],
+            fileName: params[1],
+            uploadedBy: params[2],
+            uploadDate: params[3],
+            fileType: params[4],
+            path: params[5]
+          };
+          list.push(item);
+          fs.writeFileSync(JSON_DOCUMENTS_PATH, JSON.stringify(list, null, 2));
+          resolve({ changes: 1, lastID: item.id });
         } else {
           resolve({ changes: 0 });
         }
@@ -161,8 +212,19 @@ const dbGet = (sql: string, params: any[] = []): Promise<any> => {
         if (sqlClean.includes('SELECT COUNT(*) as count FROM runbooks')) {
           const list = JSON.parse(fs.readFileSync(JSON_RUNBOOKS_PATH, 'utf8'));
           resolve({ count: list.length });
+        } else if (sqlClean.includes('SELECT COUNT(*) as count FROM users')) {
+          const list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
+          resolve({ count: list.length });
         } else if (sqlClean.includes('SELECT * FROM runbooks WHERE id = ?')) {
           const list = JSON.parse(fs.readFileSync(JSON_RUNBOOKS_PATH, 'utf8'));
+          const row = list.find((x: any) => x.id === params[0]);
+          resolve(row ? JSON.parse(JSON.stringify(row)) : null);
+        } else if (sqlClean.includes('SELECT * FROM users WHERE email = ?')) {
+          const list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
+          const row = list.find((x: any) => x.email?.toLowerCase() === params[0]?.toLowerCase());
+          resolve(row ? JSON.parse(JSON.stringify(row)) : null);
+        } else if (sqlClean.includes('SELECT * FROM users WHERE id = ?')) {
+          const list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
           const row = list.find((x: any) => x.id === params[0]);
           resolve(row ? JSON.parse(JSON.stringify(row)) : null);
         } else if (sqlClean.includes("SELECT id FROM drills WHERE status = 'RUNNING'")) {
@@ -208,6 +270,13 @@ const dbAll = (sql: string, params: any[] = []): Promise<any[]> => {
         } else if (sqlClean.includes('SELECT * FROM audit_trail')) {
           const list = JSON.parse(fs.readFileSync(JSON_AUDIT_PATH, 'utf8'));
           const sorted = list.sort((a: any, b: any) => b.timestamp.localeCompare(a.timestamp));
+          resolve(JSON.parse(JSON.stringify(sorted)));
+        } else if (sqlClean.includes('SELECT * FROM users')) {
+          const list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
+          resolve(JSON.parse(JSON.stringify(list)));
+        } else if (sqlClean.includes('SELECT * FROM documents')) {
+          const list = JSON.parse(fs.readFileSync(JSON_DOCUMENTS_PATH, 'utf8'));
+          const sorted = list.sort((a: any, b: any) => b.uploadDate.localeCompare(a.uploadDate));
           resolve(JSON.parse(JSON.stringify(sorted)));
         } else {
           resolve([]);
@@ -470,28 +539,7 @@ Description: Issue test set-get cycles on the database cluster.`,
 
 // Initialize and migrate Database tables (SQLite with dual JSON fallback)
 export async function initDb() {
-  try {
-    const sqlite3Pkg = await import('sqlite3');
-    sqlite3 = sqlite3Pkg.default || sqlite3Pkg;
-    useSQLite = true;
-  } catch (err: any) {
-    console.error('[DATABASE RECOVERY] Native SQLite3 module not found. Initiating dynamic local JSON-based resilience layers:', err.message);
-    useSQLite = false;
-  }
-
-  if (useSQLite) {
-    try {
-      db = new sqlite3.Database(DB_PATH, (err: any) => {
-        if (err) {
-          console.warn('[DATABASE FAILBACK] Failed to connect to sqlite files. Switching to file system storage:', err.message);
-          useSQLite = false;
-        }
-      });
-    } catch (e: any) {
-      console.warn('[DATABASE FAILBACK] SQLite construct failed:', e.message);
-      useSQLite = false;
-    }
-  }
+  useSQLite = false;
 
   if (useSQLite) {
     try {
@@ -555,6 +603,28 @@ export async function initDb() {
           ipAddress TEXT NOT NULL
         )
       `);
+
+      await dbRun(`
+        CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY,
+          username TEXT NOT NULL,
+          email TEXT NOT NULL UNIQUE,
+          passwordHash TEXT NOT NULL,
+          role TEXT NOT NULL,
+          createdAt TEXT NOT NULL
+        )
+      `);
+
+      await dbRun(`
+        CREATE TABLE IF NOT EXISTS documents (
+          id TEXT PRIMARY KEY,
+          fileName TEXT NOT NULL,
+          uploadedBy TEXT NOT NULL,
+          uploadDate TEXT NOT NULL,
+          fileType TEXT NOT NULL,
+          path TEXT NOT NULL
+        )
+      `);
     } catch (dbErr: any) {
       console.error('[DATABASE MIGRATION FAILED] Re-routing to JSON file storage.', dbErr.message);
       useSQLite = false;
@@ -567,7 +637,55 @@ export async function initDb() {
     if (!fs.existsSync(JSON_DRILLS_PATH)) fs.writeFileSync(JSON_DRILLS_PATH, JSON.stringify([]));
     if (!fs.existsSync(JSON_COMPLIANCE_PATH)) fs.writeFileSync(JSON_COMPLIANCE_PATH, JSON.stringify([]));
     if (!fs.existsSync(JSON_AUDIT_PATH)) fs.writeFileSync(JSON_AUDIT_PATH, JSON.stringify([]));
+    if (!fs.existsSync(JSON_USERS_PATH)) fs.writeFileSync(JSON_USERS_PATH, JSON.stringify([]));
+    if (!fs.existsSync(JSON_DOCUMENTS_PATH)) fs.writeFileSync(JSON_DOCUMENTS_PATH, JSON.stringify([]));
     console.log('[JSON DB RESILIENCE ENGINE] Dynamic local JSON data storage mounted successfully.');
+  }
+
+  // Seed default users if empty
+  let userCount = 0;
+  try {
+    if (useSQLite) {
+      const countRow = await dbGet('SELECT COUNT(*) as count FROM users');
+      userCount = countRow ? countRow.count : 0;
+    } else {
+      const list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
+      userCount = list.length;
+    }
+  } catch (err) {
+    userCount = 0;
+  }
+
+  if (userCount === 0) {
+    const defaultUsers = [
+      { id: 'usr-admin', username: 'admin', email: 'admin@dragent.com', password: 'adminpassword', role: 'Admin' },
+      { id: 'usr-operator', username: 'operator', email: 'operator@dragent.com', password: 'operatorpassword', role: 'Operator' },
+      { id: 'usr-auditor', username: 'auditor', email: 'auditor@dragent.com', password: 'auditorpassword', role: 'Auditor' },
+      { id: 'usr-viewer', username: 'viewer', email: 'viewer@dragent.com', password: 'viewerpassword', role: 'Viewer' }
+    ];
+
+    for (const u of defaultUsers) {
+      const hash = await bcrypt.hash(u.password, 10);
+      const createdAt = new Date().toISOString();
+      if (useSQLite) {
+        await dbRun(
+          'INSERT INTO users (id, username, email, passwordHash, role, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+          [u.id, u.username, u.email, hash, u.role, createdAt]
+        );
+      } else {
+        const list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
+        list.push({
+          id: u.id,
+          username: u.username,
+          email: u.email,
+          passwordHash: hash,
+          role: u.role,
+          createdAt
+        });
+        fs.writeFileSync(JSON_USERS_PATH, JSON.stringify(list, null, 2));
+      }
+    }
+    console.log('[DATABASE] Seeded default user catalog successfully.');
   }
 
   // Seed default runbooks if runbooks table is empty
@@ -737,38 +855,561 @@ const apiRateLimiter = (req: Request, res: Response, next: any) => {
 
 app.use('/api', apiRateLimiter);
 
-// Auth login endpoint
-app.post('/api/auth/login', (req, res) => {
+// Multer local file upload config
+const uploadDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${Date.now()}-${Math.random().toString(36).substr(2, 9)}${ext}`);
+  }
+});
+const upload = multer({ storage });
+
+// JWT Authentication Middleware
+const authenticateJWT = (req: any, res: Response, next: any) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
+      if (err) {
+        return res.status(401).json({ error: 'Session Expired or Invalid Token' });
+      }
+      req.user = decoded;
+      next();
+    });
+  } else {
+    res.status(401).json({ error: 'Authorization header is missing' });
+  }
+};
+
+// Document text extraction helper
+async function extractTextFromDocument(filePath: string, originalName: string): Promise<string> {
+  const ext = path.extname(originalName).toLowerCase();
+  if (ext === '.txt' || ext === '.md') {
+    return fs.readFileSync(filePath, 'utf8');
+  } else if (ext === '.docx') {
+    const result = await mammoth.extractRawText({ path: filePath });
+    return result.value || '';
+  } else if (ext === '.pdf') {
+    const dataBuffer = fs.readFileSync(filePath);
+    const data = await pdf(dataBuffer);
+    return data.text || '';
+  } else {
+    throw new Error(`Unsupported document format: ${ext}`);
+  }
+}
+
+// Deterministic document parser (for txt, md, docx, pdf headers parsing fallback)
+function runDeterministicDocumentParser(rawText: string, originalName: string) {
+  const steps: RunbookStep[] = [];
+  const lines = rawText.split('\n');
+  const title = originalName.replace(/\.[^/.]+$/, "");
+  
+  let currentStep: Partial<RunbookStep> = {};
+  let stepIndex = 1;
+  const warnings: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    // Detect new step headers
+    if (
+      line.match(/^(##|###)?\s*Step\s*\d+/i) || 
+      line.match(/^Step\s*\d+/i) || 
+      line.match(/^Proced(ure|al)?\s*\d+/i)
+    ) {
+      if (currentStep.name) {
+        currentStep.id = `step-${stepIndex++}`;
+        currentStep.status = 'PENDING';
+        steps.push(currentStep as RunbookStep);
+        currentStep = {};
+      }
+      currentStep.name = line.replace(/^(#+|##|###)?\s*(Step|Procedure)\s*\d+\s*(:|-)?\s*/i, '') || `Step ${stepIndex}`;
+    } else if (line.toLowerCase().startsWith('function:') || line.toLowerCase().startsWith('command:')) {
+      const funcRaw = line.replace(/^(function|command):/i, '').trim().toLowerCase();
+      // map to nearest supported clean function
+      if (funcRaw.includes('network') || funcRaw.includes('connect')) {
+        currentStep.function = 'check_network';
+      } else if (funcRaw.includes('stop') || funcRaw.includes('shutdown') || funcRaw.includes('replica')) {
+        currentStep.function = 'stop_primary_replica';
+      } else if (funcRaw.includes('failover') || funcRaw.includes('database') || funcRaw.includes('promote')) {
+        currentStep.function = 'failover_database';
+      } else if (funcRaw.includes('read') || funcRaw.includes('write') || funcRaw.includes('verify')) {
+        currentStep.function = 'verify_read_write';
+      } else if (funcRaw.includes('dns') || funcRaw.includes('route53') || funcRaw.includes('switchover')) {
+        currentStep.function = 'dns_switchover';
+      } else {
+        currentStep.function = funcRaw;
+      }
+    } else if (line.toLowerCase().startsWith('rto target:') || line.toLowerCase().startsWith('target:')) {
+      const match = line.match(/\d+/);
+      currentStep.rtoTarget = match ? parseInt(match[0]) : 15;
+    } else if (line.toLowerCase().startsWith('description:')) {
+      currentStep.description = line.replace(/^description:/i, '').trim();
+    } else {
+      // heuristic for filling fields
+      if (currentStep.name) {
+        if (!currentStep.description) {
+          currentStep.description = line;
+        } else {
+          currentStep.description += ` ${line}`;
+        }
+      }
+    }
+  }
+
+  // push final step
+  if (currentStep.name) {
+    currentStep.id = `step-${stepIndex++}`;
+    currentStep.status = 'PENDING';
+    steps.push(currentStep as RunbookStep);
+  }
+
+  // If no step headers found, attempt block splitter
+  if (steps.length === 0) {
+    // split by double-newlines
+    const blocks = rawText.split(/\n\s*\n/);
+    blocks.forEach((block, idx) => {
+      const blockClean = block.trim();
+      if (!blockClean) return;
+      const blockLines = blockClean.split('\n');
+      const stepName = `Automatic Procedure ${idx + 1}`;
+      let func = 'check_network';
+      let rto = 15;
+      let desc = blockClean;
+
+      blockLines.forEach((l) => {
+        const lowercaseL = l.toLowerCase();
+        if (lowercaseL.includes('rto') || lowercaseL.includes('target')) {
+          const match = l.match(/\d+/);
+          if (match) rto = parseInt(match[0]);
+        }
+        if (lowercaseL.includes('dns') || lowercaseL.includes('switch')) func = 'dns_switchover';
+        else if (lowercaseL.includes('failover')) func = 'failover_database';
+        else if (lowercaseL.includes('verify') || lowercaseL.includes('rw')) func = 'verify_read_write';
+        else if (lowercaseL.includes('stop') || lowercaseL.includes('replica')) func = 'stop_primary_replica';
+      });
+
+      steps.push({
+        id: `step-${idx + 1}`,
+        name: stepName,
+        function: func,
+        rtoTarget: rto,
+        description: desc,
+        status: 'PENDING'
+      });
+    });
+  }
+
+  // Normalize steps to standard template markdown representation
+  let markdown = `# ${title}\n\n`;
+  steps.forEach((st, index) => {
+    if (!st.function) st.function = 'check_network';
+    if (!st.rtoTarget) st.rtoTarget = 15;
+    if (!st.description) st.description = 'Continuous automated SRE safety check.';
+
+    markdown += `## Step ${index + 1}\n`;
+    markdown += `Function: ${st.function}\n`;
+    markdown += `RTO Target: ${st.rtoTarget}s\n`;
+    markdown += `Description: ${st.description}\n\n`;
+    if (index < steps.length - 1) {
+      markdown += `---\n\n`;
+    }
+  });
+
+  return {
+    title,
+    markdown,
+    steps,
+    warnings
+  };
+}
+
+// Authenticated Login
+app.post('/api/auth/login', async (req, res) => {
   const ip = req.ip || '127.0.0.1';
   if (!checkRateLimit(ip, 'auth')) {
     return res.status(429).json({ error: 'Auth rate limit exceeded. Try again in 30 seconds.' });
   }
+
   const { email, password } = req.body;
-  if (email === 'rajakowshik813@gmail.com') {
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  try {
+    const user = await dbGet('SELECT * FROM users WHERE email = ?', [email]);
+    if (!user) {
+      await logAudit('usr-unknown', email, 'Viewer', 'USER_LOGIN_FAILED', `Failed login attempt. Credential target email: "${email}". Reason: User not found.`);
+      return res.status(401).json({ error: 'Invalid user credentials.' });
+    }
+
+    const match = await bcrypt.compare(password, user.passwordHash);
+    if (!match) {
+      await logAudit(user.id, user.email, user.role, 'USER_LOGIN_FAILED', `Failed login attempt for user "${user.username}". Reason: Incorrect password.`);
+      return res.status(401).json({ error: 'Invalid user credentials.' });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, name: user.username, username: user.username, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '8h' }
+    );
+
+    await logAudit(user.id, user.email, user.role, 'USER_LOGIN', `User "${user.username}" authenticated successfully.`);
+
     res.json({
-      token: 'jwt-mock-secret-token',
+      token,
       user: {
-        id: 'usr-1',
-        name: 'Raj K.',
-        email: 'rajakowshik813@gmail.com',
-        role: 'Admin'
+        id: user.id,
+        name: user.username,
+        email: user.email,
+        role: user.role,
+        createdAt: user.createdAt
       }
     });
-  } else {
-    res.json({
-      token: 'jwt-mock-secret-token',
-      user: {
-        id: `usr-${Math.random().toString(36).substr(2, 5)}`,
-        name: email.split('@')[0],
-        email,
-        role: 'Operator'
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Logout endpoint
+app.post('/api/auth/logout', authenticateJWT, async (req: any, res) => {
+  try {
+    await logAudit(req.user.id, req.user.email, req.user.role, 'USER_LOGOUT', `User "${req.user.username}" signed out.`);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Profile endpoint
+app.get('/api/auth/me', authenticateJWT, (req: any, res) => {
+  res.json({ user: req.user });
+});
+
+// Log custom session expiration events
+app.post('/api/auth/log-expired', async (req, res) => {
+  const { email, role, userId } = req.body;
+  try {
+    await logAudit(
+      userId || 'usr-unknown',
+      email || 'unknown',
+      role || 'Viewer',
+      'SESSION_EXPIRED',
+      `Session expired or became invalid for user "${email || 'unknown'}".`
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// User Management: Get list of users (Admin only)
+app.get('/api/admin/users', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'Admin') {
+    return res.status(403).json({ error: 'Access denied: Admin permissions required.' });
+  }
+  try {
+    const list = await dbAll('SELECT * FROM users');
+    const cleanList = list.map((u: any) => ({
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      role: u.role,
+      createdAt: u.createdAt
+    }));
+    res.json(cleanList);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// User Management: Create user (Admin only)
+app.post('/api/admin/users', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'Admin') {
+    return res.status(403).json({ error: 'Access denied: Admin permissions required.' });
+  }
+  const { username, email, password, role } = req.body;
+  if (!username || !email || !password || !role) {
+    return res.status(400).json({ error: 'Username, email, password, and role are required.' });
+  }
+  try {
+    const existingUser = await dbGet('SELECT * FROM users WHERE email = ?', [email]);
+    if (existingUser) {
+      return res.status(400).json({ error: 'A user with this email catalog entry already exists.' });
+    }
+    const hash = await bcrypt.hash(password, 10);
+    const userId = `usr-${Math.random().toString(36).substr(2, 9)}`;
+    const createdAt = new Date().toISOString();
+
+    if (useSQLite) {
+      await dbRun(
+        'INSERT INTO users (id, username, email, passwordHash, role, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, username, email, hash, role, createdAt]
+      );
+    } else {
+      const list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
+      list.push({ id: userId, username, email, passwordHash: hash, role, createdAt });
+      fs.writeFileSync(JSON_USERS_PATH, JSON.stringify(list, null, 2));
+    }
+
+    await logAudit(
+      req.user.id,
+      req.user.email,
+      req.user.role,
+      'USER_CREATED',
+      `Admin created new user "${username}" (${email}) with role level "${role}".`
+    );
+
+    res.json({ id: userId, username, email, role, createdAt });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// User Management: Update user (Admin only)
+app.put('/api/admin/users/:id', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'Admin') {
+    return res.status(403).json({ error: 'Access denied: Admin permissions required.' });
+  }
+  const userId = req.params.id;
+  const { username, email, role } = req.body;
+  if (!username || !email || !role) {
+    return res.status(400).json({ error: 'Username, email, and role are required.' });
+  }
+  try {
+    const existing = await dbGet('SELECT * FROM users WHERE id = ?', [userId]);
+    if (!existing) {
+      return res.status(404).json({ error: 'User target mapping entry not found.' });
+    }
+
+    if (useSQLite) {
+      await dbRun(
+        'UPDATE users SET role = ?, username = ?, email = ? WHERE id = ?',
+        [role, username, email, userId]
+      );
+    } else {
+      const list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
+      const idx = list.findIndex((u: any) => u.id === userId);
+      if (idx !== -1) {
+        list[idx].role = role;
+        list[idx].username = username;
+        list[idx].email = email;
+        fs.writeFileSync(JSON_USERS_PATH, JSON.stringify(list, null, 2));
+      }
+    }
+
+    await logAudit(
+      req.user.id,
+      req.user.email,
+      req.user.role,
+      'USER_UPDATED',
+      `Admin modified user "${username}" (ID: ${userId}) permissions level to "${role}".`
+    );
+
+    res.json({ id: userId, username, email, role });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// User Management: Delete user (Admin only)
+app.delete('/api/admin/users/:id', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'Admin') {
+    return res.status(403).json({ error: 'Access denied: Admin permissions required.' });
+  }
+  const userId = req.params.id;
+  if (userId === req.user.id || userId === 'usr-admin') {
+    return res.status(400).json({ error: 'Security limit: Cannot delete your own active execution token or core credentials.' });
+  }
+  try {
+    const existing = await dbGet('SELECT * FROM users WHERE id = ?', [userId]);
+    if (!existing) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    if (useSQLite) {
+      await dbRun('DELETE FROM users WHERE id = ?', [userId]);
+    } else {
+      let list = JSON.parse(fs.readFileSync(JSON_USERS_PATH, 'utf8'));
+      list = list.filter((u: any) => u.id !== userId);
+      fs.writeFileSync(JSON_USERS_PATH, JSON.stringify(list, null, 2));
+    }
+
+    await logAudit(
+      req.user.id,
+      req.user.email,
+      req.user.role,
+      'USER_DELETED',
+      `Admin deleted account of user "${existing.username}" (${existing.email}).`
+    );
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get Uploaded Documents Catalog
+app.get('/api/documents', authenticateJWT, async (req, res) => {
+  try {
+    const list = await dbAll('SELECT * FROM documents');
+    res.json(list);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Document parser and upload router
+app.post('/api/runbooks/upload-document', authenticateJWT, upload.single('runbookFile'), async (req: any, res) => {
+  if (req.user.role !== 'Admin' && req.user.role !== 'Operator') {
+    return res.status(403).json({ error: 'Access denied: Inadequate role permissions.' });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: 'Invalid operation: No target file detected in request buffer.' });
+  }
+
+  const { originalname, path: tempPath, filename } = req.file;
+  const fileType = path.extname(originalname).toLowerCase();
+
+  try {
+    const rawText = await extractTextFromDocument(tempPath, originalname);
+    if (!rawText.trim()) {
+      return res.status(400).json({ 
+        error: 'Empty document: Extracted content is blank or file contains unreadable data.',
+        warnings: ['Empty documents: No valid SRE execution procedures extracted.']
+      });
+    }
+
+    let parsedResult: {
+      title: string;
+      markdown: string;
+      steps: RunbookStep[];
+      warnings: string[];
+    };
+
+    if (aiClient) {
+      try {
+        const prompt = `Convert the following raw text of a SRE/Disaster Recovery runbook document into structured SRE Markdown format.
+The standard SRE Markdown format is:
+# [Runbook Title]
+[Runbook Description]
+
+## Step [Number]
+Function: [function_name]
+RTO Target: [X]s
+Description: [description_text]
+
+Supported execution functions are EXACTLY: check_network, stop_primary_replica, failover_database, verify_read_write, dns_switchover. If a step doesn't specify one, choose the closest match or default to check_network.
+RTO target must be in seconds (e.g. 15s).
+
+Output EXACTLY a valid JSON object matching this schema:
+{
+  "title": "descriptive title",
+  "markdown": "the exact markdown string in standard SRE format, with steps separated by '---' line",
+  "steps": [
+    {
+      "name": "Step name",
+      "function": "supported_function",
+      "rtoTarget": target_seconds_as_number,
+      "description": "step description"
+    }
+  ],
+  "warnings": ["list of validation warnings as strings, e.g. 'Missing step numbers', 'Missing commands', 'Invalid runbook structure'"]
+}
+
+Raw Runbook Document Text:
+${rawText}`;
+
+        const geminiRes = await generateContentWithFallback(aiClient, prompt);
+        const textResponse = geminiRes.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const cleanText = textResponse.trim().replace(/^```json/i, '').replace(/```$/, '').trim();
+        const parsedJson = JSON.parse(cleanText);
+        parsedResult = {
+          title: parsedJson.title || originalname.replace(/\.[^/.]+$/, ""),
+          markdown: parsedJson.markdown || '',
+          steps: parsedJson.steps || [],
+          warnings: parsedJson.warnings || []
+        };
+      } catch (e: any) {
+        console.warn('[Gemini parsing failed, falling back to deterministic parser]:', e.message);
+        parsedResult = runDeterministicDocumentParser(rawText, originalname);
+      }
+    } else {
+      parsedResult = runDeterministicDocumentParser(rawText, originalname);
+    }
+
+    // Double validate extracted steps
+    if (parsedResult.steps.length === 0) {
+      parsedResult.warnings.push('Empty documents: No valid SRE execution procedures extracted.');
+    }
+
+    parsedResult.steps.forEach((st, idx) => {
+      if (!st.name) {
+        parsedResult.warnings.push(`Warning in Step ${idx + 1}: Step name is missing.`);
+      }
+      const supportedFuncs = ['check_network', 'stop_primary_replica', 'failover_database', 'verify_read_write', 'dns_switchover'];
+      if (!st.function || !supportedFuncs.includes(st.function)) {
+        parsedResult.warnings.push(`Warning in Step ${idx + 1}: Unrecognized function name "${st.function}". Supported execution block functions are: check_network, stop_primary_replica, failover_database, verify_read_write, dns_switchover`);
+      }
+      if (!st.rtoTarget || isNaN(st.rtoTarget)) {
+        parsedResult.warnings.push(`Warning in Step ${idx + 1}: RTO Target is missing or invalid. Defaulting to 15s.`);
+        st.rtoTarget = 15;
       }
     });
+
+    const docId = `doc-${Math.random().toString(36).substr(2, 9)}`;
+    const metadata = {
+      id: docId,
+      fileName: originalname,
+      uploadedBy: req.user.username,
+      uploadDate: new Date().toISOString(),
+      fileType,
+      path: `/uploads/${filename}`
+    };
+
+    if (useSQLite) {
+      await dbRun(
+        'INSERT INTO documents (id, fileName, uploadedBy, uploadDate, fileType, path) VALUES (?, ?, ?, ?, ?, ?)',
+        [metadata.id, metadata.fileName, metadata.uploadedBy, metadata.uploadDate, metadata.fileType, metadata.path]
+      );
+    } else {
+      const list = JSON.parse(fs.readFileSync(JSON_DOCUMENTS_PATH, 'utf8'));
+      list.push(metadata);
+      fs.writeFileSync(JSON_DOCUMENTS_PATH, JSON.stringify(list, null, 2));
+    }
+
+    await logAudit(
+      req.user.id,
+      req.user.email,
+      req.user.role,
+      'FILE_UPLOAD',
+      `Uploaded and parsed runbook file "${originalname}" (${fileType}). Extracted ${parsedResult.steps.length} procedures.`
+    );
+
+    res.json({
+      metadata,
+      title: parsedResult.title,
+      markdown: parsedResult.markdown,
+      steps: parsedResult.steps,
+      warnings: parsedResult.warnings
+    });
+  } catch (err: any) {
+    console.error('[Document processing error]:', err);
+    res.status(500).json({ error: err?.message || 'Failed to parse and process document.' });
   }
 });
 
 // Runbooks list
-app.get('/api/runbooks', async (req, res) => {
+app.get('/api/runbooks', authenticateJWT, async (req, res) => {
   try {
     const rows = await dbAll('SELECT * FROM runbooks ORDER BY createdAt DESC');
     const parsed = rows.map(r => ({
@@ -782,8 +1423,12 @@ app.get('/api/runbooks', async (req, res) => {
 });
 
 // Upload and Parse Runbook Markdown
-app.post('/api/runbooks/upload', async (req, res) => {
-  const { title, rawMarkdown, user } = req.body;
+app.post('/api/runbooks/upload', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'Admin' && req.user.role !== 'Operator') {
+    return res.status(403).json({ error: 'Access denied: Creator privileges needed.' });
+  }
+  const { title, rawMarkdown } = req.body;
+  const user = req.user;
   const lines = rawMarkdown.split('\n');
   let steps: RunbookStep[] = [];
   let currentStep: Partial<RunbookStep> = {};
@@ -867,8 +1512,8 @@ app.post('/api/runbooks/upload', async (req, res) => {
   }
 });
 
-// Drills list
-app.get('/api/drills', async (req, res) => {
+/// Drills list
+app.get('/api/drills', authenticateJWT, async (req, res) => {
   try {
     const rows = await dbAll('SELECT * FROM drills ORDER BY startedAt DESC');
     const parsed = rows.map(r => ({
@@ -878,13 +1523,17 @@ app.get('/api/drills', async (req, res) => {
     }));
     res.json(parsed);
   } catch (err: any) {
-    res.status(550).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
 // Start Drills with Runbook
-app.post('/api/drills/start', async (req, res) => {
-  const { runbookId, user } = req.body;
+app.post('/api/drills/start', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'Admin' && req.user.role !== 'Operator') {
+    return res.status(403).json({ error: 'Access denied: Drill execution is restricted to Admin or Operator.' });
+  }
+  const { runbookId } = req.body;
+  const user = req.user;
   try {
     const runbook = await dbGet('SELECT * FROM runbooks WHERE id = ?', [runbookId]);
     if (!runbook) {
@@ -925,8 +1574,8 @@ app.post('/api/drills/start', async (req, res) => {
       [newDrill.id, newDrill.runbookId, newDrill.runbookTitle, newDrill.status, newDrill.agentState, newDrill.startedAt, JSON.stringify(newDrill.steps), JSON.stringify(newDrill.logs), newDrill.rtoComplianceRatio]
     );
 
-    await logAudit(user?.id || 'usr-1', user?.email || 'rajakowshik813@gmail.com', user?.role || 'Admin', 'DRILL_STARTED', `Initiated Disaster Recovery testing drill "${runbook.title}" with real-exec system tools.`, newDrill.id);
-    await postWebhookNotify('DRILL_START', `Real Drill ${newDrill.id} of runbook ${runbook.title} started by ${user?.email || 'rajakowshik813@gmail.com'}`);
+    await logAudit(user?.id || 'usr-1', user?.email || 'admin@dragent.com', user?.role || 'Admin', 'DRILL_STARTED', `Initiated Disaster Recovery testing drill "${runbook.title}" with real-exec system tools.`, newDrill.id);
+    await postWebhookNotify('DRILL_START', `Real Drill ${newDrill.id} of runbook ${runbook.title} started by ${user?.email || 'admin@dragent.com'}`);
 
     res.json(newDrill);
   } catch (err: any) {
@@ -935,7 +1584,7 @@ app.post('/api/drills/start', async (req, res) => {
 });
 
 // Single Drill Fetch
-app.get('/api/drills/:id', async (req, res) => {
+app.get('/api/drills/:id', authenticateJWT, async (req, res) => {
   try {
     const drill = await dbGet('SELECT * FROM drills WHERE id = ?', [req.params.id]);
     if (!drill) {
@@ -953,7 +1602,10 @@ app.get('/api/drills/:id', async (req, res) => {
 });
 
 // Update Drill Log/State
-app.post('/api/drills/:id/update', async (req, res) => {
+app.post('/api/drills/:id/update', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'Admin' && req.user.role !== 'Operator') {
+    return res.status(403).json({ error: 'Access denied: Drill updating is restricted to Admin or Operator.' });
+  }
   const { agentState, logs, steps, status, rtoComplianceRatio } = req.body;
   try {
     const drill = await dbGet('SELECT * FROM drills WHERE id = ?', [req.params.id]);
@@ -1013,7 +1665,10 @@ function executeLocalCommand(commandLine: string): Promise<{ success: boolean; s
 }
 
 // REAL Runbooks Tools Execution on Database, Terminal & System Shells
-app.post('/api/drills/tools/execute', async (req, res) => {
+app.post('/api/drills/tools/execute', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'Admin' && req.user.role !== 'Operator') {
+    return res.status(403).json({ error: 'Access denied: Drill tools execution is restricted to Admin or Operator.' });
+  }
   const { toolName, failSimulate, drillId, stepId } = req.body;
   
   // Requirement 2 & 3: Map runbook functions to real local executable scripts
@@ -1112,8 +1767,12 @@ app.post('/api/drills/tools/execute', async (req, res) => {
 });
 
 // Gemini intelligence: Generate Compliance Audit Reports via Gemini API
-app.post('/api/reports/generate', async (req, res) => {
-  const { drillId, user } = req.body;
+app.post('/api/reports/generate', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'Admin' && req.user.role !== 'Operator' && req.user.role !== 'Auditor') {
+    return res.status(403).json({ error: 'Access denied: Report generation privileges required.' });
+  }
+  const { drillId } = req.body;
+  const user = req.user;
   try {
     const cached = reportCache[drillId];
     if (cached && cached.expires > Date.now()) {
@@ -1242,7 +1901,7 @@ app.post('/api/reports/generate', async (req, res) => {
 });
 
 // Single Report fetch
-app.get('/api/reports/:id', async (req, res) => {
+app.get('/api/reports/:id', authenticateJWT, async (req, res) => {
   try {
     const report = await dbGet('SELECT * FROM compliance_reports WHERE drillId = ?', [req.params.id]);
     if (!report) {
@@ -1260,7 +1919,10 @@ app.get('/api/reports/:id', async (req, res) => {
 });
 
 // Audit Trails
-app.get('/api/audit-trail', async (req, res) => {
+app.get('/api/audit-trail', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'Admin' && req.user.role !== 'Auditor') {
+    return res.status(403).json({ error: 'Access denied: SRE Auditor privileges required.' });
+  }
   try {
     const rows = await dbAll('SELECT * FROM audit_trail ORDER BY timestamp DESC');
     res.json(rows);
@@ -1270,7 +1932,7 @@ app.get('/api/audit-trail', async (req, res) => {
 });
 
 // Prometheus System Metrics provider from SQLite data
-app.get('/api/system/metrics', async (req, res) => {
+app.get('/api/system/metrics', authenticateJWT, async (req, res) => {
   try {
     const drillsRow = await dbAll('SELECT * FROM drills');
     const recentDrills = drillsRow.slice(0, 5).map(r => ({
@@ -1313,7 +1975,10 @@ app.get('/api/system/metrics', async (req, res) => {
 });
 
 // Simulate Rate Limiter Event
-app.post('/api/system/simulate-rate-limit', async (req, res) => {
+app.post('/api/system/simulate-rate-limit', authenticateJWT, async (req: any, res) => {
+  if (req.user.role !== 'Admin' && req.user.role !== 'Operator') {
+    return res.status(403).json({ error: 'Access denied: Administrative simulation credentials required.' });
+  }
   const ip = '185.220.101.44';
   for (let i = 0; i < 40; i++) {
     checkRateLimit(ip, 'api');

@@ -151,9 +151,13 @@ export default function AgentMonitor({
     let stepError = '';
     
     try {
+      const token = localStorage.getItem('dr_token');
       const res = await fetch('/api/drills/tools/execute', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           toolName: currentStep.function,
           failSimulate: currentStep.function === 'failover_database' && forceFailStep3,

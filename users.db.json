@@ -1,0 +1,34 @@
+[
+  {
+    "id": "usr-admin",
+    "username": "admin",
+    "email": "admin@dragent.com",
+    "passwordHash": "$2b$10$OQ8jpCFPXWZvqXRBBnNgGe3j.1Bk79rzzmL4ucxxyYYrtxGSNiDhS",
+    "role": "Admin",
+    "createdAt": "2026-06-09T10:20:45.728Z"
+  },
+  {
+    "id": "usr-operator",
+    "username": "operator",
+    "email": "operator@dragent.com",
+    "passwordHash": "$2b$10$3.69FHR8RNnXe0EBP8bX6uMaDgDS2HwXTUcDIneW6l8qqjnegTzo2",
+    "role": "Operator",
+    "createdAt": "2026-06-09T10:20:45.838Z"
+  },
+  {
+    "id": "usr-auditor",
+    "username": "auditor",
+    "email": "auditor@dragent.com",
+    "passwordHash": "$2b$10$zbcKHztvXT35X.2dW8Z27O2Z2wXkhs7uV9CtPac.8SPWYr.Teq05S",
+    "role": "Auditor",
+    "createdAt": "2026-06-09T10:20:45.947Z"
+  },
+  {
+    "id": "usr-viewer",
+    "username": "viewer",
+    "email": "viewer@dragent.com",
+    "passwordHash": "$2b$10$qNRE5DxmvB5xivsS/QWbQe1E5Rb5AaZvmWQza/L2.7U9HYSHBJ5aO",
+    "role": "Viewer",
+    "createdAt": "2026-06-09T10:20:46.051Z"
+  }
+]
