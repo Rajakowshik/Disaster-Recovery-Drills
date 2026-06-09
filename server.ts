@@ -275,6 +275,63 @@ if (api_key && api_key !== 'MY_GEMINI_API_KEY') {
   });
 }
 
+// Helper function to call generateContent with retry and backoff on transient errors (like 503 / 429)
+async function generateContentWithRetry(client: GoogleGenAI, params: any, maxRetries = 4, initialDelay = 1500) {
+  let attempt = 0;
+  let delay = initialDelay;
+  while (attempt < maxRetries) {
+    try {
+      return await client.models.generateContent(params);
+    } catch (err: any) {
+      attempt++;
+      const errMsg = err?.message || String(err);
+      const isRetryable = 
+        err?.status === 'UNAVAILABLE' || 
+        err?.code === 503 || 
+        err?.status === 'RESOURCE_EXHAUSTED' || 
+        err?.code === 429 || 
+        errMsg.includes('503') || 
+        errMsg.includes('UNAVAILABLE') || 
+        errMsg.includes('429') ||
+        errMsg.includes('demand') ||
+        errMsg.includes('temporary');
+
+      if (isRetryable && attempt < maxRetries) {
+        console.warn(`[Gemini API] Query failed (attempt ${attempt}/${maxRetries}) due to high demand/unavailability. Retrying in ${delay}ms...`, err?.message || err);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 1.5; // Exponential backoff
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
+
+// Wrapper to try multiple models (like 'gemini-3.5-flash' and 'gemini-3.1-flash-lite') if one fails
+async function generateContentWithFallback(client: GoogleGenAI, prompt: string) {
+  const modelsToTry = ['gemini-3.5-flash', 'gemini-3.1-flash-lite'];
+  let lastError: any = null;
+
+  for (const model of modelsToTry) {
+    try {
+      console.log(`[Gemini API] Querying model ${model}...`);
+      const response = await generateContentWithRetry(client, {
+        model,
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+        }
+      });
+      return response;
+    } catch (err) {
+      console.warn(`[Gemini API] Model ${model} failed:`, err?.message || err);
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
 // Rate Limiting mock variables
 let rateLimitCounter: Record<string, { count: number; expires: number }> = {};
 const checkRateLimit = (ip: string, scenario: 'api' | 'auth' | 'agent'): boolean => {
@@ -654,13 +711,7 @@ app.post('/api/reports/generate', async (req, res) => {
         "technicalSummary": "Deep SRE DBA technical points here..."
       }`;
 
-      const geminiResponse = await aiClient.models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-        }
-      });
+      const geminiResponse = await generateContentWithFallback(aiClient, prompt);
       const resText = geminiResponse.text?.trim() || '{}';
       const parsed = JSON.parse(resText);
       if (parsed.executiveSummary) execSummary = parsed.executiveSummary;

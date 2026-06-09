@@ -36,21 +36,44 @@ export default function AgentMonitor({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const executionLoopRef = useRef<NodeJS.Timeout | null>(null);
   const terminalBottomRef = useRef<HTMLDivElement | null>(null);
+  const lastDrillIdRef = useRef<string | null>(null);
 
-  // Initialize status on mount/change
+  // Initialize status on mount/change, checking for ID changes to prevent resetting the state machine
   useEffect(() => {
     if (drill) {
       setMockLogs(drill.logs);
-      if (drill.status === 'RUNNING') {
-        setDrillRunning(true);
-        setActiveStepIndex(0);
-        setTimeElapsed(0);
+      
+      const isNewDrill = lastDrillIdRef.current !== drill.id;
+      if (isNewDrill) {
+        lastDrillIdRef.current = drill.id;
+        
+        // Find first incomplete step index to resume or start cleanly
+        const firstNonCompletedIndex = drill.steps.findIndex(
+          (step) => step.status !== 'SUCCESS' && step.status !== 'FAILURE'
+        );
+        const startIndex = firstNonCompletedIndex >= 0 ? firstNonCompletedIndex : 0;
+        setActiveStepIndex(startIndex);
+        
+        if (drill.status === 'RUNNING') {
+          setDrillRunning(true);
+          setTimeElapsed(0);
+        } else {
+          setDrillRunning(false);
+        }
+      } else {
+        // If it's the same drill but status changed
+        if (drill.status === 'RUNNING') {
+          setDrillRunning(true);
+        } else {
+          setDrillRunning(false);
+        }
       }
     } else {
+      lastDrillIdRef.current = null;
       setDrillRunning(false);
       setMockLogs([]);
     }
-  }, [drill]);
+  }, [drill?.id, drill?.status]);
 
   // Handle Terminal Scrolling Automatically
   useEffect(() => {

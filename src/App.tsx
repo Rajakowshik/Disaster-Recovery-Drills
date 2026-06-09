@@ -52,6 +52,7 @@ export default function App() {
   const [globalLoading, setGlobalLoading] = useState(true);
   const [reportLoading, setReportLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [retryCount, setRetryCount] = useState(0);
 
   // Helper to safely parse JSON response and avoid HTML fallback unhandled rejections
   const safeFetchJson = async (res: Response) => {
@@ -102,9 +103,10 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeDrill?.id]);
 
-  const fetchInitialTelemetry = async () => {
+  const fetchInitialTelemetry = async (attempt = 1) => {
     setGlobalLoading(true);
     setErrorMessage('');
+    setRetryCount(attempt - 1);
     try {
       const rbRes = await fetch('/api/runbooks');
       const rbs = await safeFetchJson(rbRes);
@@ -115,10 +117,19 @@ export default function App() {
 
       await fetchDrillsAndAudits();
       await fetchGeneralMetrics();
-    } catch (err: any) {
-      setErrorMessage(`Failed to connect to backend microservices: ${err?.message || err}`);
-    } finally {
+      setRetryCount(0);
       setGlobalLoading(false);
+    } catch (err: any) {
+      console.warn(`[Telemetry Sync] Connection attempt ${attempt} failed:`, err);
+      const isNetworkOrBootErr = !err?.message || err?.message?.includes('fetch') || err?.message?.includes('HTML');
+      if (isNetworkOrBootErr && attempt < 8) {
+        setTimeout(() => {
+          fetchInitialTelemetry(attempt + 1);
+        }, 2000);
+      } else {
+        setErrorMessage(`Failed to connect to backend microservices: ${err?.message || err}`);
+        setGlobalLoading(false);
+      }
     }
   };
 
@@ -483,7 +494,16 @@ export default function App() {
             {globalLoading ? (
               <div className="flex flex-col justify-center items-center py-40">
                 <RefreshCw className="w-8 h-8 text-blue-500 animate-spin mb-4" />
-                <span className="text-sm font-medium text-slate-400 tracking-wide">Initializing telemetry channels...</span>
+                <span className="text-sm font-medium text-slate-400 tracking-wide">
+                  {retryCount > 0 
+                    ? `Attempting to reconnect (Attempt ${retryCount}/8)...` 
+                    : "Initializing telemetry channels..."}
+                </span>
+                {retryCount > 0 && (
+                  <span className="text-xs text-slate-500 mt-2 font-mono">
+                    Backend container is initializing. Re-establishing link stream...
+                  </span>
+                )}
               </div>
             ) : (
               <div id="active-viewport-card" className="space-y-6">
