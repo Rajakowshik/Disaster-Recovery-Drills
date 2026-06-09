@@ -59,7 +59,7 @@ const dbRun = (sql: string, params: any[] = []): Promise<any> => {
             id: params[0],
             title: params[1],
             description: params[2],
-            steps: typeof params[3] === 'string' ? JSON.parse(params[3]) : params[3],
+            steps: typeof params[3] === 'string' ? params[3] : JSON.stringify(params[3]),
             rawMarkdown: params[4],
             createdAt: params[5]
           };
@@ -75,8 +75,8 @@ const dbRun = (sql: string, params: any[] = []): Promise<any> => {
             status: params[3],
             agentState: params[4],
             startedAt: params[5],
-            steps: typeof params[6] === 'string' ? JSON.parse(params[6]) : params[6],
-            logs: typeof params[7] === 'string' ? JSON.parse(params[7]) : params[7],
+            steps: typeof params[6] === 'string' ? params[6] : JSON.stringify(params[6]),
+            logs: typeof params[7] === 'string' ? params[7] : JSON.stringify(params[7]),
             rtoComplianceRatio: params[8]
           };
           list.push(item);
@@ -87,8 +87,8 @@ const dbRun = (sql: string, params: any[] = []): Promise<any> => {
           const idx = list.findIndex((x: any) => x.id === params[6]);
           if (idx !== -1) {
             list[idx].agentState = params[0];
-            list[idx].logs = typeof params[1] === 'string' ? JSON.parse(params[1]) : params[1];
-            list[idx].steps = typeof params[2] === 'string' ? JSON.parse(params[2]) : params[2];
+            list[idx].logs = typeof params[1] === 'string' ? params[1] : JSON.stringify(params[1]);
+            list[idx].steps = typeof params[2] === 'string' ? params[2] : JSON.stringify(params[2]);
             list[idx].status = params[3];
             list[idx].rtoComplianceRatio = params[4];
             list[idx].completedAt = params[5];
@@ -111,7 +111,7 @@ const dbRun = (sql: string, params: any[] = []): Promise<any> => {
             isCompliant: params[10],
             executiveSummary: params[11],
             technicalSummary: params[12],
-            auditorChecklist: typeof params[13] === 'string' ? JSON.parse(params[13]) : params[13],
+            auditorChecklist: typeof params[13] === 'string' ? params[13] : JSON.stringify(params[13]),
             createdAt: params[14]
           };
           const idx = list.findIndex((x: any) => x.drillId === item.drillId);
@@ -593,7 +593,10 @@ export async function initDb() {
         );
       } else {
         const list = JSON.parse(fs.readFileSync(JSON_RUNBOOKS_PATH, 'utf8'));
-        list.push(rb);
+        list.push({
+          ...rb,
+          steps: JSON.stringify(rb.steps)
+        });
         fs.writeFileSync(JSON_RUNBOOKS_PATH, JSON.stringify(list, null, 2));
       }
     }
