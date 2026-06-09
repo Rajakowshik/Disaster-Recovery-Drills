@@ -125,7 +125,7 @@ export default function ComplianceViewer({
           
           <div className="h-[240px]">
             {chartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <BarChart data={chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                   <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} unit="s" />

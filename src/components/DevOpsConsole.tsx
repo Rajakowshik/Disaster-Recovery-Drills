@@ -111,7 +111,7 @@ export default function DevOpsConsole({
           </div>
 
           <div className="h-[230px]">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <AreaChart data={throughputHistory} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
                 <XAxis dataKey="time" tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
