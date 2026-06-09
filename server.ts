@@ -109,6 +109,140 @@ Function: dns_switchover
 RTO Target: 8s
 Description: Update Cloudflare route tags to point directly to DR endpoint.`,
     createdAt: new Date().toISOString()
+  },
+  {
+    id: 'rb-2',
+    title: 'Active-Active CDN & Edge API Gateway Failover Runbook',
+    description: 'Emergency routing reconfiguration to steer internet-facing traffic away from an unresponsive edge region.',
+    steps: [
+      {
+        id: 'step-1',
+        name: 'Verify edge health & ping core API',
+        function: 'check_network',
+        rtoTarget: 5,
+        description: 'Ping primary regional cluster endpoints to confirm edge outage severity.',
+        status: 'PENDING'
+      },
+      {
+        id: 'step-2',
+        name: 'De-register unresponsive API routing instances',
+        function: 'stop_primary_replica',
+        rtoTarget: 12,
+        description: 'Isolate and spin down connections pointing to unhealthy servers at the API Gateway layer.',
+        status: 'PENDING'
+      },
+      {
+        id: 'step-3',
+        name: 'Re-route DNS zone pointers to secondary gateway',
+        function: 'dns_switchover',
+        rtoTarget: 10,
+        description: 'Update active DNS routing records to point completely to the alternative edge gateway endpoint.',
+        status: 'PENDING'
+      },
+      {
+        id: 'step-4',
+        name: 'Inject high-density transactional probe checks',
+        function: 'verify_read_write',
+        rtoTarget: 8,
+        description: 'Confirm client authorization headers and write transactions function smoothly over secondary cluster endpoints.',
+        status: 'PENDING'
+      }
+    ],
+    rawMarkdown: `# Active-Active CDN & Edge API Gateway Failover Runbook
+
+## Step 1
+Function: check_network
+RTO Target: 5s
+Description: Ping primary regional cluster endpoints to confirm edge outage severity.
+
+---
+
+## Step 2
+Function: stop_primary_replica
+RTO Target: 12s
+Description: Isolate and spin down connections pointing to unhealthy servers at the API Gateway layer.
+
+---
+
+## Step 3
+Function: dns_switchover
+RTO Target: 10s
+Description: Update active DNS routing records to point completely to the alternative edge gateway endpoint.
+
+---
+
+## Step 4
+Function: verify_read_write
+RTO Target: 8s
+Description: Confirm client authorization headers and write transactions function smoothly over secondary cluster endpoints.`,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'rb-3',
+    title: 'High-Availability Redis Cache Disaster Recovery Runbook',
+    description: 'Step-by-step procedure to isolate a corrupted Redis cache keyspace and promote its failover replica to primary cluster lead.',
+    steps: [
+      {
+        id: 'step-1',
+        name: 'Validate internal cluster network latency',
+        function: 'check_network',
+        rtoTarget: 10,
+        description: 'Check connectivity, latency metrics, and handshake success rates on internal subnet switches.',
+        status: 'PENDING'
+      },
+      {
+        id: 'step-2',
+        name: 'Isolate fragmented or degraded primary cache units',
+        function: 'stop_primary_replica',
+        rtoTarget: 15,
+        description: 'Shut down degraded cluster endpoints exhibiting out-of-bounds metrics to forestall stale cache stamping.',
+        status: 'PENDING'
+      },
+      {
+        id: 'step-3',
+        name: 'Promote passive read replica to master node',
+        function: 'failover_database',
+        rtoTarget: 20,
+        description: 'Trigger failover promoting protocols on the target cluster manager and activate LRU eviction rules.',
+        status: 'PENDING'
+      },
+      {
+        id: 'step-4',
+        name: 'Conduct health verification and write-through trials',
+        function: 'verify_read_write',
+        rtoTarget: 12,
+        description: 'Issue test set, get, expire keyspace cycles on the promoted cache instance and assert 0% packet loss.',
+        status: 'PENDING'
+      }
+    ],
+    rawMarkdown: `# High-Availability Redis Cache Disaster Recovery Runbook
+
+## Step 1
+Function: check_network
+RTO Target: 10s
+Description: Check connectivity, latency metrics, and handshake success rates on internal subnet switches.
+
+---
+
+## Step 2
+Function: stop_primary_replica
+RTO Target: 15s
+Description: Shut down degraded cluster endpoints exhibiting out-of-bounds metrics to forestall stale cache stamping.
+
+---
+
+## Step 3
+Function: failover_database
+RTO Target: 20s
+Description: Trigger failover promoting protocols on the target cluster manager and activate LRU eviction rules.
+
+---
+
+## Step 4
+Function: verify_read_write
+RTO Target: 12s
+Description: Issue test set, get, expire keyspace cycles on the promoted cache instance and assert 0% packet loss.`,
+    createdAt: new Date().toISOString()
   }
 ];
 

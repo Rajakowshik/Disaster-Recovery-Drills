@@ -431,12 +431,26 @@ export default function App() {
 
           {/* API Error alerts */}
           {errorMessage && (
-            <div className="bg-red-950/40 border border-red-900 text-red-200 text-xs px-4 py-3 rounded-xl flex items-center justify-between gap-2 shadow animate-bounce">
+            <div className="bg-red-950/40 border border-red-900 text-red-200 text-xs px-4 py-3 rounded-xl flex items-center justify-between gap-4 shadow">
               <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-red-400" />
+                <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
                 <span>{errorMessage}</span>
               </div>
-              <button onClick={() => setErrorMessage('')} className="text-red-400 font-bold hover:underline font-mono">Dismiss</button>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => fetchInitialTelemetry()} 
+                  className="text-emerald-400 font-semibold hover:underline font-mono cursor-pointer"
+                >
+                  Retry
+                </button>
+                <span className="text-slate-600">|</span>
+                <button 
+                  onClick={() => setErrorMessage('')} 
+                  className="text-red-400 font-semibold hover:underline font-mono cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
           )}
 

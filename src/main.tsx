@@ -39,55 +39,73 @@ if (typeof window !== 'undefined') {
   }, true);
 
   // 4. Monkey-patch the browser's native WebSocket to short-circuit HMR connections safely
-  const OriginalWebSocket = window.WebSocket;
-  if (OriginalWebSocket) {
-    const ProxyWebSocket = function (this: any, url: string | URL, protocols?: string | string[]) {
-      const isViteHmr = (
-        protocols === 'vite-hmr' ||
-        (Array.isArray(protocols) && protocols.includes('vite-hmr')) ||
-        (typeof url === 'string' && (url.includes('vite-hmr') || url.includes('/vite')))
-      );
+  try {
+    const OriginalWebSocket = window.WebSocket;
+    if (OriginalWebSocket) {
+      const ProxyWebSocket = function (this: any, url: string | URL, protocols?: string | string[]) {
+        const isViteHmr = (
+          protocols === 'vite-hmr' ||
+          (Array.isArray(protocols) && protocols.includes('vite-hmr')) ||
+          (typeof url === 'string' && (url.includes('vite-hmr') || url.includes('/vite')))
+        );
 
-      if (isViteHmr) {
-        // Return a mock WebSocket object that silently stays in a closed state
-        const self: any = {
-          url: String(url),
-          readyState: OriginalWebSocket.CLOSED,
-          bufferedAmount: 0,
-          extensions: '',
-          protocol: '',
-          binaryType: 'blob',
-          onopen: null,
-          onmessage: null,
-          onerror: null,
-          onclose: null,
-          send: () => {},
-          close: () => {},
-          addEventListener: (type: string, listener: any) => {
-            if (type === 'close') {
-              setTimeout(() => {
-                const event = { type: 'close', wasClean: true, code: 1005, reason: 'HMR silent override' };
-                if (self.onclose) {
-                  try { self.onclose(event); } catch (e) {}
-                }
-                if (listener) {
-                  try { listener(event); } catch (e) {}
-                }
-              }, 50);
-            }
-          },
-          removeEventListener: () => {},
-          dispatchEvent: () => true,
-        };
-        return self;
+        if (isViteHmr) {
+          // Return a mock WebSocket object that silently stays in a closed state
+          const self: any = {
+            url: String(url),
+            readyState: OriginalWebSocket.CLOSED,
+            bufferedAmount: 0,
+            extensions: '',
+            protocol: '',
+            binaryType: 'blob',
+            onopen: null,
+            onmessage: null,
+            onerror: null,
+            onclose: null,
+            send: () => {},
+            close: () => {},
+            addEventListener: (type: string, listener: any) => {
+              if (type === 'close') {
+                setTimeout(() => {
+                  const event = { type: 'close', wasClean: true, code: 1005, reason: 'HMR silent override' };
+                  if (self.onclose) {
+                    try { self.onclose(event); } catch (e) {}
+                  }
+                  if (listener) {
+                    try { listener(event); } catch (e) {}
+                  }
+                }, 50);
+              }
+            },
+            removeEventListener: () => {},
+            dispatchEvent: () => true,
+          };
+          return self;
+        }
+
+        return Reflect.construct(OriginalWebSocket, [url, protocols]);
+      };
+
+      ProxyWebSocket.prototype = OriginalWebSocket.prototype;
+      Object.setPrototypeOf(ProxyWebSocket, OriginalWebSocket);
+
+      try {
+        Object.defineProperty(window, 'WebSocket', {
+          value: ProxyWebSocket,
+          configurable: true,
+          writable: true,
+          enumerable: true
+        });
+      } catch (defineError) {
+        try {
+          (window as any).WebSocket = ProxyWebSocket;
+        } catch (assignError) {
+          console.warn('Unable to patch window.WebSocket directly. HMR connection errors will still be silenced by error listeners.');
+        }
       }
-
-      return Reflect.construct(OriginalWebSocket, [url, protocols]);
-    };
-
-    ProxyWebSocket.prototype = OriginalWebSocket.prototype;
-    Object.setPrototypeOf(ProxyWebSocket, OriginalWebSocket);
-    window.WebSocket = ProxyWebSocket as any;
+    }
+  } catch (globalWsError) {
+    console.warn('WebSocket interceptor skipped due to environment window constraints:', globalWsError);
   }
 }
 
