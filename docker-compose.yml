@@ -12,27 +12,68 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - DATABASE_URL=postgresql://sre_admin:SecureAuditPass99@db:5432/dr_drill_db
+      - DATABASE_URL=postgresql://sre_admin:SecureAuditPass99@postgres-primary:5432/dr_primary_db
       - REDIS_URL=redis://redis:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY}
     depends_on:
-      - db
+      - postgres-primary
+      - postgres-backup
+      - postgres-audit
       - redis
     restart: always
 
-  # Production PostgreSQL Database
-  db:
-    image: postgres:15-alpine
+  # Primary Database Container (Active Production)
+  postgres-primary:
+    image: postgres:16-alpine
+    container_name: postgres-primary
     environment:
       - POSTGRES_USER=sre_admin
       - POSTGRES_PASSWORD=SecureAuditPass99
-      - POSTGRES_DB=dr_drill_db
+      - POSTGRES_DB=dr_primary_db
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata_primary:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sre_admin -d dr_drill_db"]
+      test: ["CMD-SHELL", "pg_isready -U sre_admin -d dr_primary_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  # Backup Database Container (Standby DR replica)
+  postgres-backup:
+    image: postgres:16-alpine
+    container_name: postgres-backup
+    environment:
+      - POSTGRES_USER=sre_admin
+      - POSTGRES_PASSWORD=SecureAuditPass99
+      - POSTGRES_DB=dr_backup_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata_backup:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sre_admin -d dr_backup_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  # Audit Database Container (Execution history logs)
+  postgres-audit:
+    image: postgres:16-alpine
+    container_name: postgres-audit
+    environment:
+      - POSTGRES_USER=sre_admin
+      - POSTGRES_PASSWORD=SecureAuditPass99
+      - POSTGRES_DB=dr_audit_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata_audit:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sre_admin -d dr_audit_db"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -69,5 +110,7 @@ services:
     restart: always
 
 volumes:
-  pgdata:
+  pgdata_primary:
+  pgdata_backup:
+  pgdata_audit:
   redisdata:

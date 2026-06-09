@@ -25,6 +25,7 @@ import AgentMonitor from './components/AgentMonitor';
 import ComplianceViewer from './components/ComplianceViewer';
 import DevOpsConsole from './components/DevOpsConsole';
 import AuditTrail from './components/AuditTrail';
+import InfrastructureStatus from './components/InfrastructureStatus';
 
 export default function App() {
   // Authentication State
@@ -967,6 +968,8 @@ export default function App() {
               </div>
             ) : (
               <div id="active-viewport-card" className="space-y-6">
+                
+                <InfrastructureStatus />
                 
                 {activeTab === 'runbooks' && (
                   <RunbookEditor
