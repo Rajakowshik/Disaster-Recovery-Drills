@@ -56,7 +56,7 @@ export default function ComplianceViewer({
 
   // Pre-process chart values comparing Actual timing versus RTO targets
   const chartData = selectedDrill?.steps.map((st) => ({
-    name: st.name.slice(0, 15) + '...',
+    name: (st.name || '').slice(0, 15) + '...',
     Actual: st.duration || 0,
     Goal: st.rtoTarget
   })) || [];

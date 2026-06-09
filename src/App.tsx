@@ -391,7 +391,7 @@ export default function App() {
             <div className="bg-[#111827] p-4 rounded-xl border border-slate-800">
               <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest font-sans">Active Drill Target</div>
               <div className="text-md font-semibold text-white mt-1.5 truncate">
-                {activeDrill ? activeDrill.title.slice(0, 18) + '...' : 'DR-STANDBY_IDLE'}
+                {activeDrill ? (activeDrill.runbookTitle || '').slice(0, 18) + '...' : 'DR-STANDBY_IDLE'}
               </div>
               <div className="text-[10px] text-blue-400 mt-1 font-mono uppercase">
                 {activeDrill ? `Stage: ${activeDrill.agentState}` : 'Ready for dispatch'}
