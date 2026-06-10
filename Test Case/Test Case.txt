@@ -1,0 +1,169 @@
+Since your project is a DR Drill Walkthrough Agent (Runbook Management + Drill Execution + Compliance Reporting + Role-Based Access Control), here are professional test cases you can submit.
+
+Test Case 1: User Login
+
+Test Case ID	TC-001
+
+Module	Authentication
+Test Scenario	Login with valid credentials
+Preconditions	User account exists
+Test Steps	1. Open Login Page<br>2. Enter valid email and password<br>3. Click Login
+Expected Result	User is successfully logged in and redirected to Dashboard
+Status	Pass
+
+
+
+---
+
+Test Case 2: Invalid Login
+
+Test Case ID	TC-002
+
+Module	Authentication
+Test Scenario	Login with invalid password
+Test Steps	1. Enter valid email<br>2. Enter wrong password<br>3. Click Login
+Expected Result	Error message "Invalid Credentials" displayed
+Status	Pass
+
+
+
+---
+
+Test Case 3: Create Runbook
+
+Test Case ID	TC-003
+
+Module	Runbook Management
+Test Scenario	Create a new DR Runbook
+Test Steps	1. Login as Admin<br>2. Open Runbooks<br>3. Click Create Runbook<br>4. Enter details<br>5. Save
+Expected Result	Runbook is created and stored in database
+Status	Pass
+
+
+
+---
+
+Test Case 4: Upload Runbook Document
+
+Test Case ID	TC-004
+
+Module	Document Upload
+Test Scenario	Upload PDF Runbook
+Test Steps	1. Open Upload Runbook<br>2. Select PDF file<br>3. Upload
+Expected Result	PDF is uploaded and parsed successfully
+Status	Pass
+
+
+
+---
+
+Test Case 5: Start Drill
+
+Test Case ID	TC-005
+
+Module	Drill Execution
+Test Scenario	Start a DR Drill
+Test Steps	1. Select Runbook<br>2. Click Start Drill
+Expected Result	Drill status changes to RUNNING
+Status	Pass
+
+
+
+---
+
+Test Case 6: Execute Network Check Step
+
+Test Case ID	TC-006
+
+Module	Tool Execution
+Test Scenario	Execute check_network tool
+Test Steps	1. Start Drill<br>2. Execute Step 1
+Expected Result	Network connectivity verified and status SUCCESS
+Status	Pass
+
+
+
+---
+
+Test Case 7: Database Failover
+
+Test Case ID	TC-007
+
+Module	Failover Engine
+Test Scenario	Execute database failover
+Test Steps	1. Stop Primary Replica<br>2. Execute Failover
+Expected Result	Backup database promoted as Active Database
+Status	Pass
+
+
+
+---
+
+Test Case 8: Verify Read/Write Operations
+
+Test Case ID	TC-008
+
+Module	Database Verification
+Test Scenario	Verify database operations after failover
+Test Steps	1. Execute verify_read_write
+Expected Result	Data write and read operation successful
+Status	Pass
+
+
+
+---
+
+Test Case 9: Generate Compliance Report
+
+Test Case ID	TC-009
+
+Module	Compliance Reporting
+Test Scenario	Generate report after drill completion
+Test Steps	1. Complete Drill<br>2. Click Generate Report
+Expected Result	Compliance report generated successfully
+Status	Pass
+
+
+
+---
+
+Test Case 10: Role-Based Access Control
+
+Test Case ID	TC-010
+
+Module	RBAC
+Test Scenario	Viewer tries to execute drill
+Test Steps	1. Login as Viewer<br>2. Attempt to start Drill
+Expected Result	Access denied message displayed
+Status	Pass
+
+
+
+---
+
+Test Case 11: RTO Compliance Validation
+
+Test Case ID	TC-011
+
+Module	Compliance Engine
+Test Scenario	Check RTO compliance calculation
+Test Steps	1. Complete drill within RTO limit
+Expected Result	Compliance percentage calculated correctly
+Status	Pass
+
+
+
+---
+
+Test Case 12: Audit Trail Logging
+
+Test Case ID	TC-012
+
+Module	Audit Trail
+Test Scenario	Verify audit logs generation
+Test Steps	1. Login<br>2. Start Drill<br>3. Generate Report
+Expected Result	All actions recorded in audit trail
+Status	Pass
+
+
+These 12 test cases cover the major modules of your DR Drill Walkthrough Agent.

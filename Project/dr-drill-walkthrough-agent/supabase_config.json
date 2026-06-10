@@ -1,8 +1,0 @@
-{
-  "enabled": true,
-  "primary_url": "https://jchjjvlvcwfdmpigotre.supabase.co",
-  "primary_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjaGpqdmx2Y3dmZG1waWdvdHJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMDgyMjAsImV4cCI6MjA5NjU4NDIyMH0._3NU6vc27CLcwenZFtO19Cprjzf194wP4NCOekCcjpM",
-  "backup_url": "",
-  "backup_key": "",
-  "is_initialized": false
-}

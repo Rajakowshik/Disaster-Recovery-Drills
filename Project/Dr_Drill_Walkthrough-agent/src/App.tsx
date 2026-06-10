@@ -1058,6 +1058,7 @@ export default function App() {
                     onRefreshMetrics={fetchGeneralMetrics}
                     onSimulateRateLimit={handleSimulateRateLimit}
                     authFetch={authFetch}
+                    currentUser={currentUser}
                   />
                 )}
 

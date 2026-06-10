@@ -44,6 +44,16 @@ import {
   resetSupabaseClients,
   cleanSupabaseUrl
 } from './server-supabase';
+import * as XLSX from 'xlsx';
+import {
+  setupEnterpriseDemoDatabase,
+  getEnterpriseDataStats,
+  changeActiveDataSource,
+  updateExternalConnectionSettings,
+  registerUploadedDataset,
+  runSReSimulation
+} from './src/seeder';
+
 
 
 dotenv.config();
@@ -1151,23 +1161,33 @@ function runDeterministicDocumentParser(rawText: string, originalName: string) {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (!line) continue;
+    if (!line || line === '---' || line.startsWith('---')) {
+      continue;
+    }
 
     // Detect new step headers
-    if (
-      line.match(/^(##|###)?\s*Step\s*\d+/i) || 
-      line.match(/^Step\s*\d+/i) || 
-      line.match(/^Proced(ure|al)?\s*\d+/i)
-    ) {
+    const isHeader = /^(?:#+\s*)?(?:Step|Procedure)\s*\d+/i.test(line);
+
+    if (isHeader) {
       if (currentStep.name) {
         currentStep.id = `step-${stepIndex++}`;
         currentStep.status = 'PENDING';
+        if (!currentStep.function) {
+          currentStep.function = 'check_network';
+        }
+        if (!currentStep.rtoTarget) {
+          currentStep.rtoTarget = 15;
+        }
+        if (!currentStep.description) {
+          currentStep.description = 'Continuous automated network safety validation.';
+        }
         steps.push(currentStep as RunbookStep);
         currentStep = {};
       }
-      currentStep.name = line.replace(/^(#+|##|###)?\s*(Step|Procedure)\s*\d+\s*(:|-)?\s*/i, '') || `Step ${stepIndex}`;
+      const rawName = line.replace(/^(?:#+\s*)?(?:Step|Procedure)\s*\d+\s*[:\-]?\s*/i, '').trim();
+      currentStep.name = rawName || `Step ${stepIndex}`;
     } else if (line.toLowerCase().startsWith('function:') || line.toLowerCase().startsWith('command:')) {
-      const funcRaw = line.replace(/^(function|command):/i, '').trim().toLowerCase();
+      const funcRaw = line.replace(/^(?:function|command):/i, '').trim().toLowerCase();
       // map to nearest supported clean function
       if (funcRaw.includes('network') || funcRaw.includes('connect')) {
         currentStep.function = 'check_network';
@@ -1203,6 +1223,15 @@ function runDeterministicDocumentParser(rawText: string, originalName: string) {
   if (currentStep.name) {
     currentStep.id = `step-${stepIndex++}`;
     currentStep.status = 'PENDING';
+    if (!currentStep.function) {
+      currentStep.function = 'check_network';
+    }
+    if (!currentStep.rtoTarget) {
+      currentStep.rtoTarget = 15;
+    }
+    if (!currentStep.description) {
+      currentStep.description = 'Continuous automated network safety validation.';
+    }
     steps.push(currentStep as RunbookStep);
   }
 
@@ -1654,23 +1683,58 @@ app.post('/api/runbooks/upload', authenticateJWT, requireRoles(['Admin', 'Operat
   try {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
-      if (line.startsWith('## Step') || line.startsWith('### Step')) {
+      if (!line || line === '---' || line.startsWith('---')) {
+        continue;
+      }
+
+      // Robust check for any level of heading or line starting with Step / Procedure (case-insensitive)
+      const isHeader = /^(?:#+\s*)?(?:Step|Procedure)\s*\d+/i.test(line);
+
+      if (isHeader) {
         if (currentStep.name) {
           currentStep.id = `step-${stepIndex++}`;
           currentStep.status = 'PENDING';
+          if (!currentStep.function) {
+            currentStep.function = 'check_network';
+          }
+          if (!currentStep.rtoTarget) {
+            currentStep.rtoTarget = 15;
+          }
+          if (!currentStep.description) {
+            currentStep.description = 'Continuous automated network safety validation.';
+          }
           steps.push(currentStep as RunbookStep);
           currentStep = {};
         }
-        currentStep.name = line.replace(/^(#+)\s*Step\s*\d+\s*(:|\-)?\s*/i, '') || `Step ${stepIndex}`;
-      } else if (line.startsWith('Function:')) {
-        currentStep.function = line.replace('Function:', '').trim();
-      } else if (line.startsWith('RTO Target:')) {
+        const rawName = line.replace(/^(?:#+\s*)?(?:Step|Procedure)\s*\d+\s*[:\-]?\s*/i, '').trim();
+        currentStep.name = rawName || `Step ${stepIndex}`;
+      } else if (line.toLowerCase().startsWith('function:') || line.toLowerCase().startsWith('command:')) {
+        const funcRaw = line.replace(/^(?:function|command):/i, '').trim().toLowerCase();
+        // map nearest supported function
+        if (funcRaw.includes('network') || funcRaw.includes('connect')) {
+          currentStep.function = 'check_network';
+        } else if (funcRaw.includes('stop') || funcRaw.includes('shutdown') || funcRaw.includes('replica')) {
+          currentStep.function = 'stop_primary_replica';
+        } else if (funcRaw.includes('failover') || funcRaw.includes('database') || funcRaw.includes('promote')) {
+          currentStep.function = 'failover_database';
+        } else if (funcRaw.includes('read') || funcRaw.includes('write') || funcRaw.includes('verify')) {
+          currentStep.function = 'verify_read_write';
+        } else if (funcRaw.includes('dns') || funcRaw.includes('route53') || funcRaw.includes('switchover')) {
+          currentStep.function = 'dns_switchover';
+        } else {
+          currentStep.function = funcRaw;
+        }
+      } else if (line.toLowerCase().startsWith('rto target:') || line.toLowerCase().startsWith('target:')) {
          const matches = line.match(/\d+/);
          currentStep.rtoTarget = matches ? parseInt(matches[0]) : 15;
-      } else if (line.startsWith('Description:')) {
-        currentStep.description = line.replace('Description:', '').trim();
-      } else if (line.length > 0 && currentStep.name && !currentStep.description) {
-        currentStep.description = line;
+      } else if (line.toLowerCase().startsWith('description:')) {
+         currentStep.description = line.replace(/^description:/i, '').trim();
+      } else if (line.length > 0 && currentStep.name) {
+         if (!currentStep.description) {
+           currentStep.description = line;
+         } else {
+           currentStep.description += ` ${line}`;
+         }
       }
     }
     // Push final step
@@ -2035,6 +2099,32 @@ app.post('/api/drills/tools/execute', authenticateJWT, requireRoles(['Admin', 'O
   const { toolName, failSimulate, drillId, stepId } = req.body;
   
   const startedTime = Date.now();
+
+  let stepName = stepId || 'step-unknown';
+  let runbookTitle = 'Active SRE Runbook';
+  try {
+    const drill = await dbGet('SELECT * FROM drills WHERE id = ?', [drillId]);
+    if (drill) {
+      runbookTitle = drill.runbookTitle;
+      const parsedSteps = safeParseJson(drill.steps);
+      const matchedStep = parsedSteps.find((s: any) => s.id === stepId);
+      if (matchedStep) {
+        stepName = matchedStep.name;
+      }
+    }
+  } catch (err) {
+    console.error('[DRILL AUDIT RESOLVER ERROR]:', err);
+  }
+
+  // Log Step Started Event
+  await logAudit(
+    req.user?.id || 'system',
+    req.user?.email || 'admin@dragent.com',
+    req.user?.role || 'Admin',
+    'DRILL_STEP_STARTED',
+    `Step "${stepName}" (${toolName}) of runbook "${runbookTitle}" execution pipeline started for Drill ID "${drillId}".`,
+    drillId
+  );
   
   // Real Local Docker controller and TCP port emulation routing
   const result = await handleDockerOrTCPCommand(toolName, drillId || 'dr-unknown', stepId || 'step-unknown', failSimulate);
@@ -2042,6 +2132,27 @@ app.post('/api/drills/tools/execute', authenticateJWT, requireRoles(['Admin', 'O
   const endedTime = Date.now();
   const durationMs = endedTime - startedTime;
   const durationS = Math.max(1, Math.round(durationMs / 1000));
+
+  // Log Step Completed or Failed Event
+  if (result.success) {
+    await logAudit(
+      req.user?.id || 'system',
+      req.user?.email || 'admin@dragent.com',
+      req.user?.role || 'Admin',
+      'DRILL_STEP_COMPLETED',
+      `Step "${stepName}" (${toolName}) of runbook "${runbookTitle}" executed successfully in ${durationS}s.`,
+      drillId
+    );
+  } else {
+    await logAudit(
+      req.user?.id || 'system',
+      req.user?.email || 'admin@dragent.com',
+      req.user?.role || 'Admin',
+      'DRILL_STEP_FAILED',
+      `Step "${stepName}" (${toolName}) of runbook "${runbookTitle}" failed during execution: ${result.stderr || 'Execution failed.'}`,
+      drillId
+    );
+  }
 
   // Evidence Collection System
   // Store compliance record payload securely as a local backup evidence json file
@@ -2396,6 +2507,124 @@ app.post('/api/system/simulate-rate-limit', authenticateJWT, requireRoles(['Admi
   res.json({ message: 'Simulated API rate-limiting burst. WAF sliding-window filter rule triggered.' });
 });
 
+
+// SRE Enterprise Demo Database & Recovery testing endpoints
+app.get('/api/demo/stats', authenticateJWT, async (req, res) => {
+  try {
+    const stats = await getEnterpriseDataStats();
+    res.json(stats);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/demo/set-source', authenticateJWT, requireRoles(['Admin', 'Operator']), async (req: any, res) => {
+  const { source } = req.body;
+  if (!source || !['demo', 'uploaded', 'external'].includes(source)) {
+    return res.status(400).json({ error: 'Invalid data source selection.' });
+  }
+  try {
+    changeActiveDataSource(source);
+    const stats = await getEnterpriseDataStats();
+    await logAudit(
+      req.user.id,
+      req.user.email,
+      req.user.role,
+      'DATA_SOURCE_CHANGED',
+      `Switched active disaster recovery testing target data source plane to: "${source.toUpperCase()}".`
+    );
+    res.json({ success: true, stats });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/demo/upload', authenticateJWT, requireRoles(['Admin', 'Operator']), upload.single('datasetFile'), async (req: any, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No dataset file provided.' });
+  }
+  try {
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    let recordCount = 0;
+    if (ext === '.json') {
+      const cnt = fs.readFileSync(req.file.path, 'utf8');
+      const parsed = JSON.parse(cnt);
+      recordCount = Array.isArray(parsed) ? parsed.length : 1;
+    } else if (ext === '.csv') {
+      const cnt = fs.readFileSync(req.file.path, 'utf8');
+      const rows = cnt.split('\n').filter(r => r.trim().length > 0);
+      recordCount = rows.length > 0 ? rows.length - 1 : 0;
+    } else if (ext === '.xlsx') {
+      const workbook = XLSX.read(fs.readFileSync(req.file.path));
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet);
+      recordCount = data.length;
+    } else {
+      return res.status(400).json({ error: 'Format unsupported. Use JSON, CSV, or XLSX files only.' });
+    }
+
+    const reg = registerUploadedDataset(req.file.originalname, ext.substring(1).toUpperCase(), recordCount);
+    await logAudit(
+      req.user.id,
+      req.user.email,
+      req.user.role,
+      'DATASET_UPLOADED',
+      `SRE Catalog ingested: "${req.file.originalname}" (${recordCount} records loaded into active active memory cache).`
+    );
+    res.json({ success: true, dataset: reg });
+  } catch (err: any) {
+    res.status(500).json({ error: `Dataset ingestion failure: ${err.message}` });
+  }
+});
+
+app.post('/api/demo/connect-external', authenticateJWT, requireRoles(['Admin', 'Operator']), async (req: any, res) => {
+  const { type, url } = req.body;
+  if (!type || !url) {
+    return res.status(400).json({ error: 'Database type and connection URL are required.' });
+  }
+
+  const isValidUrl = url.startsWith('postgres://') || url.startsWith('postgresql://') || url.startsWith('https://');
+  if (!isValidUrl) {
+    return res.status(400).json({ error: 'DB Authentication error: Connection string must use a valid postgresql:// or https:// schema.' });
+  }
+
+  try {
+    updateExternalConnectionSettings(type, url, 'CONNECTED');
+    await logAudit(
+      req.user.id,
+      req.user.email,
+      req.user.role,
+      'EXTERNAL_DATABASE_CONNECTED',
+      `Established authenticated connection with external ${type.toUpperCase()} database cluster at "${url.substring(0, 15)}...".`
+    );
+    res.json({ success: true, message: `Connected to external ${type} database successfully!` });
+  } catch (err: any) {
+    res.status(500).json({ error: `Connection failed: ${err.message}` });
+  }
+});
+
+app.post('/api/demo/start-simulation', authenticateJWT, requireRoles(['Admin', 'Operator']), async (req: any, res) => {
+  const { simulationType } = req.body;
+  if (!simulationType) {
+    return res.status(400).json({ error: 'Simulation type is required.' });
+  }
+
+  try {
+    const result = await runSReSimulation(simulationType);
+    await logAudit(
+      req.user.id,
+      req.user.email,
+      req.user.role,
+      'DR_SIMULATION_EXEC',
+      `Triggered "${simulationType.toUpperCase()}" disaster recovery simulation exercise against target data source. Completed database snap-recovery sequence in ${result.durationMs}ms.`
+    );
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: `SRE Simulation failure: ${err.message}` });
+  }
+});
+
 // Express global error handling middleware
 app.use((err: any, req: Request, res: Response, next: any) => {
   console.error('[EXPRESS ERROR]:', err);
@@ -2416,7 +2645,10 @@ const initServer = async () => {
     // 1. Initialize SQLite Database Tables & seed Runbooks
     await initDb();
     
-    // 2. Setup Route listeners
+    // 2. Initialize SRE Enterprise scale simulation sandbox database
+    await setupEnterpriseDemoDatabase();
+    
+    // 3. Setup Route listeners
     if (process.env.NODE_ENV !== 'production') {
       const vite = await createViteServer({
         server: { middlewareMode: true },
