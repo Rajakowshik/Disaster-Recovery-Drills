@@ -41,11 +41,8 @@ The **DR Drill Walkthrough Agent** is a full-stack SRE platform that automates t
 ---
 
 ## 🚀 Project Links
+https://remix-remix-dr-drill-walkthrough-agent-529549451818.asia-southeast1.run.app
 
-| Resource | Link |
-|-----------|--------|
-| Live Demo | [https://your-app-link.com](https://remix-remix-dr-drill-walkthrough-agent-529549451818.asia-southeast1.run.app) |
-| GitHub Repository | [https://github.com/yourusername/dr-drill-agent](https://github.com/Rajakowshik/Disaster-Recovery-Drills/tree/main) |
 
 ---
 
