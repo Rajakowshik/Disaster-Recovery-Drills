@@ -38,7 +38,29 @@
 
 The **DR Drill Walkthrough Agent** is a full-stack SRE platform that automates the execution of Disaster Recovery (DR) runbooks. It simulates multi-node PostgreSQL infrastructure, executes step-by-step recovery procedures with real OS-level tooling, tracks RTO (Recovery Time Objective) compliance per step, and generates AI-powered compliance audit reports — all from a single web dashboard.
 
-### Key Capabilities
+---
+
+## 🚀 Project Links
+
+| Resource | Link |
+|-----------|--------|
+| Live Demo | https://your-app-link.com |
+| GitHub Repository | https://github.com/yourusername/dr-drill-agent |
+
+---
+
+## 🔑 Demo Credentials
+
+| Role | Email | Password |
+|--------|--------|--------|
+| Admin | admin@dragent.com | adminpassword |
+| Operator | operator@dragent.com | operatorpassword |
+| Auditor | auditor@dragent.com | auditorpassword |
+| Viewer | viewer@dragent.com | viewerpassword |
+
+---
+
+## Key Capabilities
 
 | Capability | Description |
 |---|---|
