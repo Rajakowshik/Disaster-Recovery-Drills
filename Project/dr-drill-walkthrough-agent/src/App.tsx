@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { 
   Shield, FileText, Activity, Layers, RefreshCw, LogIn, UserPlus, LogOut,
   Compass, AlertTriangle, AlertCircle, LayoutDashboard, Database, HelpCircle,
@@ -25,7 +25,6 @@ import AgentMonitor from './components/AgentMonitor';
 import ComplianceViewer from './components/ComplianceViewer';
 import DevOpsConsole from './components/DevOpsConsole';
 import AuditTrail from './components/AuditTrail';
-import InfrastructureStatus from './components/InfrastructureStatus';
 
 export default function App() {
   // Authentication State
@@ -47,6 +46,10 @@ export default function App() {
   const [runbooks, setRunbooks] = useState<Runbook[]>([]);
   const [drills, setDrills] = useState<Drill[]>([]);
   const [activeDrill, setActiveDrill] = useState<Drill | null>(null);
+  const activeDrillRef = useRef<Drill | null>(null);
+  useEffect(() => {
+    activeDrillRef.current = activeDrill;
+  }, [activeDrill]);
   const [selectedRunbook, setSelectedRunbook] = useState<Runbook | null>(null);
   const [activeReport, setActiveReport] = useState<ComplianceReport | null>(null);
   const [auditTrail, setAuditTrail] = useState<AuditEvent[]>([]);
@@ -258,7 +261,7 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.error('Failed to update log state', err);
+      console.warn('Failed to update log state', err);
     }
   };
 
@@ -270,23 +273,66 @@ export default function App() {
         setSystemMetrics(data);
       }
     } catch (err) {
-      console.error(err);
+      console.warn('Failed to retrieve general metrics', err);
     }
   };
 
   const syncActiveDrillState = async () => {
-    if (!activeDrill || activeDrill.status !== 'RUNNING') return;
+    const currentActiveDrill = activeDrillRef.current;
+    if (!currentActiveDrill || currentActiveDrill.status !== 'RUNNING') return;
     try {
-      const res = await authFetch(`/api/drills/${activeDrill.id}`);
+      const res = await authFetch(`/api/drills/${currentActiveDrill.id}`);
       if (res.ok) {
         const data = await safeFetchJson(res);
-        setActiveDrill(data);
+        
         if (data.status !== 'RUNNING') {
+          setActiveDrill(data);
           fetchDrillsAndAudits();
+        } else {
+          // If still running, merge steps to prevent any status reversions or timers clobbering
+          const getStatusPriority = (status: string) => {
+            if (status === 'SUCCESS' || status === 'FAILURE' || status === 'SKIPPED') return 3;
+            if (status === 'RUNNING') return 2;
+            return 1;
+          };
+          
+          const mergedSteps = (currentActiveDrill.steps || []).map((localStep, idx) => {
+            const serverStep = data.steps?.[idx];
+            if (!serverStep) return localStep;
+            
+            const localPriority = getStatusPriority(localStep.status);
+            const serverPriority = getStatusPriority(serverStep.status);
+            
+            if (localPriority > serverPriority) {
+              return localStep;
+            } else if (serverPriority > localPriority) {
+              return serverStep;
+            } else {
+              return {
+                ...serverStep,
+                ...localStep,
+                duration: localStep.duration ?? serverStep.duration,
+                startedAt: localStep.startedAt ?? serverStep.startedAt,
+                completedAt: localStep.completedAt ?? serverStep.completedAt,
+                output: localStep.output ?? serverStep.output,
+                error: localStep.error ?? serverStep.error,
+              };
+            }
+          });
+          
+          const mergedLogs = (data.logs?.length || 0) > (currentActiveDrill.logs?.length || 0)
+            ? data.logs
+            : currentActiveDrill.logs || [];
+            
+          setActiveDrill({
+            ...data,
+            steps: mergedSteps,
+            logs: mergedLogs,
+          });
         }
       }
     } catch (err) {
-      console.error(err);
+      console.warn('Failed to sync active drill state', err);
     }
   };
 
@@ -431,18 +477,15 @@ export default function App() {
 
   // Fast-fill test logins
   const handleFastFillLogin = (role: string) => {
-    setLoginPassword('adminpassword'); // common default seeded password for convenience
+    setLoginPassword(''); // Password fields must remain empty for manual secure authentication
     if (role === 'admin') {
       setLoginEmail('admin@dragent.com');
     } else if (role === 'operator') {
       setLoginEmail('operator@dragent.com');
-      setLoginPassword('operatorpassword');
     } else if (role === 'auditor') {
       setLoginEmail('auditor@dragent.com');
-      setLoginPassword('auditorpassword');
     } else if (role === 'viewer') {
       setLoginEmail('viewer@dragent.com');
-      setLoginPassword('viewerpassword');
     }
   };
 
@@ -454,8 +497,17 @@ export default function App() {
     });
     
     if (!res.ok) {
-      const errData = await safeFetchJson(res).catch(() => ({ error: 'Upload parsing constraint failure' }));
-      throw new Error(errData.error || 'Failed to parse');
+      let errorMsg = 'Upload parsing constraint failure';
+      try {
+        const text = await res.text().catch(() => '');
+        const parsed = JSON.parse(text);
+        if (parsed && parsed.error) {
+          errorMsg = parsed.error;
+        }
+      } catch {
+        // use fallback message
+      }
+      throw new Error(errorMsg);
     }
 
     const data = await safeFetchJson(res);
@@ -475,7 +527,7 @@ export default function App() {
       });
 
       if (!res.ok) {
-        const err = await safeFetchJson(res).catch(() => ({ error: 'Concurrent Drill limit checks blocked execution.' }));
+        const err = await safeFetchJson(res).catch((e: any) => ({ error: e.message || 'Concurrent Drill limit checks blocked execution.' }));
         setErrorMessage(err.error || 'Concurrent Drill limit exceeded.');
         return;
       }
@@ -969,8 +1021,6 @@ export default function App() {
             ) : (
               <div id="active-viewport-card" className="space-y-6">
                 
-                <InfrastructureStatus />
-                
                 {activeTab === 'runbooks' && (
                   <RunbookEditor
                     runbooks={runbooks}
@@ -989,6 +1039,7 @@ export default function App() {
                     onDrillUpdate={handleDrillUpdate}
                     onStopDrill={handleStopDrill}
                     onGenerateReport={handleGenerateReport}
+                    currentUser={currentUser}
                   />
                 )}
 
@@ -997,6 +1048,7 @@ export default function App() {
                     report={activeReport}
                     selectedDrill={activeDrill || (drills.length > 0 ? drills[0] : null)}
                     loading={reportLoading}
+                    currentUser={currentUser}
                   />
                 )}
 
@@ -1005,6 +1057,7 @@ export default function App() {
                     metrics={systemMetrics}
                     onRefreshMetrics={fetchGeneralMetrics}
                     onSimulateRateLimit={handleSimulateRateLimit}
+                    authFetch={authFetch}
                   />
                 )}
 

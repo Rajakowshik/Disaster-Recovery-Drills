@@ -234,85 +234,93 @@ Description: Rewrite active DNS pointers to target DR server IP locations.`);
               Ingest Core Markdown Runbook
             </h3>
             
-            <form onSubmit={handleUploadSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">
-                  Runbook Title
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Postgres DB Regional Failover Checksheet"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+            {currentUser?.role === 'Auditor' || currentUser?.role === 'Viewer' ? (
+              <div className="border border-slate-800 bg-slate-950/20 rounded-xl p-10 flex flex-col items-center justify-center text-center">
+                <AlertTriangle className="w-8 h-8 text-amber-500 mb-2 animate-pulse" />
+                <span className="text-sm font-semibold text-slate-300">Runbook Composition Locked</span>
+                <span className="text-xs text-slate-500 mt-1">Ingesting or building direct runbook configurations requires Admin or Operator role levels.</span>
               </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide">
-                    Runbook Instructions Markdown
+            ) : (
+              <form onSubmit={handleUploadSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">
+                    Runbook Title
                   </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Postgres DB Regional Failover Checksheet"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-880 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide">
+                      Runbook Instructions Markdown
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setMarkdown(`# Custom Failover Scheme\n\n## Step 1\nFunction: check_network\nRTO Target: 8s\nDescription: Validate subnet reachability.`)}
+                      className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-3 h-3" /> Reset Template
+                    </button>
+                  </div>
+                  <textarea
+                    rows={12}
+                    value={markdown}
+                    onChange={(e) => setMarkdown(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 font-mono text-xs text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none leading-relaxed"
+                  />
+                </div>
+
+                {/* Parser warnings */}
+                {warnings.length > 0 && (
+                  <div className="bg-amber-950/40 border border-amber-900 rounded-lg p-3 text-amber-200 text-xs space-y-1 max-h-[140px] overflow-y-auto">
+                    <span className="font-bold flex items-center gap-1.5 uppercase text-[10px] tracking-wider text-amber-400">
+                      <AlertTriangle className="w-4 h-4 text-amber-400" /> 
+                      Runbook Validation Feedback ({warnings.length}):
+                    </span>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      {warnings.map((warn, i) => (
+                        <li key={i}>{warn}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="bg-red-950/40 border border-red-900 text-red-200 text-xs px-3 py-2 rounded-lg flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                {success && (
+                  <div className="bg-emerald-950/40 border border-emerald-905 text-emerald-200 text-xs px-3 py-2 rounded-lg flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                    <span>SRE Runbook verified and compiled into telemetry stack successfully!</span>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2">
                   <button
-                    type="button"
-                    onClick={() => setMarkdown(`# Custom Failover Scheme\n\n## Step 1\nFunction: check_network\nRTO Target: 8s\nDescription: Validate subnet reachability.`)}
-                    className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+                    type="submit"
+                    disabled={loading || activeDrillRunning}
+                    className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+                      activeDrillRunning 
+                        ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20'
+                    }`}
                   >
-                    <RefreshCw className="w-3 h-3" /> Reset Template
+                    <CheckCircle className="w-4 h-4" />
+                    {loading ? 'Compiling Runbook...' : 'Verify & Mount SRE Runbook'}
                   </button>
                 </div>
-                <textarea
-                  rows={12}
-                  value={markdown}
-                  onChange={(e) => setMarkdown(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 font-mono text-xs text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none leading-relaxed"
-                />
-              </div>
-
-              {/* Parser warnings */}
-              {warnings.length > 0 && (
-                <div className="bg-amber-950/40 border border-amber-900 rounded-lg p-3 text-amber-200 text-xs space-y-1 max-h-[140px] overflow-y-auto">
-                  <span className="font-bold flex items-center gap-1.5 uppercase text-[10px] tracking-wider text-amber-400">
-                    <AlertTriangle className="w-4 h-4 text-amber-400" /> 
-                    Runbook Validation Feedback ({warnings.length}):
-                  </span>
-                  <ul className="list-disc list-inside space-y-0.5">
-                    {warnings.map((warn, i) => (
-                      <li key={i}>{warn}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {error && (
-                <div className="bg-red-950/40 border border-red-900 text-red-200 text-xs px-3 py-2 rounded-lg flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
-                  <span>{error}</span>
-                </div>
-              )}
-
-              {success && (
-                <div className="bg-emerald-950/40 border border-emerald-905 text-emerald-200 text-xs px-3 py-2 rounded-lg flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                  <span>SRE Runbook verified and compiled into telemetry stack successfully!</span>
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2">
-                <button
-                  type="submit"
-                  disabled={loading || activeDrillRunning}
-                  className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-                    activeDrillRunning 
-                      ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
-                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20'
-                  }`}
-                >
-                  <CheckCircle className="w-4 h-4" />
-                  {loading ? 'Compiling Runbook...' : 'Verify & Mount SRE Runbook'}
-                </button>
-              </div>
-            </form>
+              </form>
+            )}
           </div>
         ) : (
           <div className="space-y-6 flex-1 flex flex-col justify-between">
@@ -326,41 +334,49 @@ Description: Rewrite active DNS pointers to target DR server IP locations.`);
               </p>
 
               {/* Drag Area */}
-              <div
-                onDragEnter={handleDrag}
-                onDragOver={handleDrag}
-                onDragLeave={handleDrag}
-                onDrop={handleDrop}
-                className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center justify-center transition-all ${
-                  dragActive 
-                    ? 'border-blue-505 bg-blue-950/20 shadow-lg shadow-blue-500/10 scale-[0.99]' 
-                    : 'border-slate-800 bg-slate-950/50 hover:border-slate-700'
-                }`}
-              >
-                <input
-                  type="file"
-                  id="file-upload-input"
-                  multiple={false}
-                  onChange={handleFileChange}
-                  accept=".txt,.md,.docx,.pdf"
-                  className="hidden"
-                />
-                
-                {fileParsing ? (
-                  <div className="text-center space-y-2">
-                    <RefreshCw className="w-10 h-10 text-blue-505 animate-spin mx-auto" />
-                    <p className="text-xs font-semibold text-slate-300">Executing SRE semantic parser pipeline...</p>
-                  </div>
-                ) : (
-                  <label htmlFor="file-upload-input" className="text-center cursor-pointer block w-full space-y-2">
-                    <Upload className="w-10 h-10 text-slate-500 hover:text-blue-400 transition-colors mx-auto" />
-                    <p className="text-xs text-slate-300">
-                      <span className="font-bold text-blue-400">Click to select SRE schema</span> or drag & drop runbooks here
-                    </p>
-                    <p className="text-[10px] text-slate-600 font-mono">Supported catalog keys: TXT | Markdown | MS Word | PDF</p>
-                  </label>
-                )}
-              </div>
+              {currentUser?.role === 'Auditor' || currentUser?.role === 'Viewer' ? (
+                <div className="border border-slate-800 bg-slate-950/20 rounded-xl p-10 flex flex-col items-center justify-center text-center">
+                  <AlertTriangle className="w-8 h-8 text-amber-500 mb-2 animate-pulse" />
+                  <span className="text-sm font-semibold text-slate-300">Smart Document Ingestion Restrained</span>
+                  <span className="text-xs text-slate-500 mt-1">Creation and upload tools require Admin or Operator credentials level.</span>
+                </div>
+              ) : (
+                <div
+                  onDragEnter={handleDrag}
+                  onDragOver={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center justify-center transition-all ${
+                    dragActive 
+                      ? 'border-blue-505 bg-blue-950/20 shadow-lg shadow-blue-500/10 scale-[0.99]' 
+                      : 'border-slate-800 bg-slate-950/50 hover:border-slate-700'
+                  }`}
+                >
+                  <input
+                    type="file"
+                    id="file-upload-input"
+                    multiple={false}
+                    onChange={handleFileChange}
+                    accept=".txt,.md,.docx,.pdf"
+                    className="hidden"
+                  />
+                  
+                  {fileParsing ? (
+                    <div className="text-center space-y-2">
+                      <RefreshCw className="w-10 h-10 text-blue-505 animate-spin mx-auto" />
+                      <p className="text-xs font-semibold text-slate-300">Executing SRE semantic parser pipeline...</p>
+                    </div>
+                  ) : (
+                    <label htmlFor="file-upload-input" className="text-center cursor-pointer block w-full space-y-2">
+                      <Upload className="w-10 h-10 text-slate-500 hover:text-blue-400 transition-colors mx-auto" />
+                      <p className="text-xs text-slate-300">
+                        <span className="font-bold text-blue-400">Click to select SRE schema</span> or drag & drop runbooks here
+                      </p>
+                      <p className="text-[10px] text-slate-600 font-mono">Supported catalog keys: TXT | Markdown | MS Word | PDF</p>
+                    </label>
+                  )}
+                </div>
+              )}
 
               {error && (
                 <div className="bg-red-950/40 border border-red-900 text-red-100 text-xs px-3 py-2 rounded-lg flex items-center gap-2 mt-4">
@@ -457,18 +473,24 @@ Description: Rewrite active DNS pointers to target DR server IP locations.`);
               </ul>
             </div>
 
-            <button
-              onClick={onStartDrill}
-              disabled={activeDrillRunning}
-              className={`w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                activeDrillRunning
-                  ? 'bg-amber-950/30 text-amber-500 border border-amber-900/50 cursor-not-allowed'
-                  : 'bg-emerald-600 hover:bg-emerald-550 text-white shadow-lg shadow-emerald-700/20'
-              }`}
-            >
-              <Play className="w-4 h-4 fill-current text-white" />
-              {activeDrillRunning ? 'Drill Execution In Progress' : 'Initialize Automated Agent Drill'}
-            </button>
+            {currentUser?.role === 'Auditor' || currentUser?.role === 'Viewer' ? (
+              <div className="bg-slate-950 border border-slate-850 p-3 rounded-lg text-center text-xs text-slate-500 font-mono">
+                🔒 DRILL_EXECUTION_LOCKED (READ-ONLY PRIVILEGES)
+              </div>
+            ) : (
+              <button
+                onClick={onStartDrill}
+                disabled={activeDrillRunning}
+                className={`w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  activeDrillRunning
+                    ? 'bg-amber-950/30 text-amber-500 border border-amber-900/50 cursor-not-allowed'
+                    : 'bg-emerald-600 hover:bg-emerald-550 text-white shadow-lg shadow-emerald-700/20'
+                }`}
+              >
+                <Play className="w-4 h-4 fill-current text-white" />
+                {activeDrillRunning ? 'Drill Execution In Progress' : 'Initialize Automated Agent Drill'}
+              </button>
+            )}
           </div>
         )}
       </div>

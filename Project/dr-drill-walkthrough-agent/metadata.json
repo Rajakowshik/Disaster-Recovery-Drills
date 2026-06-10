@@ -1,6 +1,8 @@
 {
-  "name": "DR Drill Walkthrough Agent",
+  "name": "Remix: Remix: DR Drill Walkthrough Agent",
   "description": "An intelligent, production-grade Disaster Recovery drill execution agent that parses runbooks, runs automated validation probes, compares timelines against RTO targets, and generates comprehensive compliance audit reports.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

@@ -8,20 +8,22 @@ import {
   Terminal, ShieldCheck, Play, Skull, RefreshCw, Eye, Brain, Compass, 
   Settings, CheckCircle, AlertCircle, Clock, RotateCcw, AlertOctagon, FileText 
 } from 'lucide-react';
-import { Drill, RunbookStep, AgentState } from '../types';
+import { Drill, RunbookStep, AgentState, User } from '../types';
 
 interface AgentMonitorProps {
   drill: Drill | null;
   onDrillUpdate: (drill: Drill) => Promise<void>;
   onStopDrill: () => void;
   onGenerateReport: (drillId: string) => Promise<void>;
+  currentUser?: User;
 }
 
 export default function AgentMonitor({
   drill,
   onDrillUpdate,
   onStopDrill,
-  onGenerateReport
+  onGenerateReport,
+  currentUser
 }: AgentMonitorProps) {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [timeElapsed, setTimeElapsed] = useState(0);
@@ -38,10 +40,28 @@ export default function AgentMonitor({
   const terminalBottomRef = useRef<HTMLDivElement | null>(null);
   const lastDrillIdRef = useRef<string | null>(null);
 
+  // Persistent reference trackers to safeguard against race conditions and stale state reads
+  const drillRef = useRef<Drill | null>(drill);
+  const activeStepIndexRef = useRef(activeStepIndex);
+  const logsRef = useRef<string[]>([]);
+  const isLoopRunningRef = useRef(false);
+
+  useEffect(() => {
+    drillRef.current = drill;
+    if (drill) {
+      logsRef.current = drill.logs || [];
+    }
+  }, [drill]);
+
+  useEffect(() => {
+    activeStepIndexRef.current = activeStepIndex;
+  }, [activeStepIndex]);
+
   // Initialize status on mount/change, checking for ID changes to prevent resetting the state machine
   useEffect(() => {
     if (drill) {
-      setMockLogs(drill.logs);
+      setMockLogs(drill.logs || []);
+      logsRef.current = drill.logs || [];
       
       const isNewDrill = lastDrillIdRef.current !== drill.id;
       if (isNewDrill) {
@@ -53,6 +73,8 @@ export default function AgentMonitor({
         );
         const startIndex = firstNonCompletedIndex >= 0 ? firstNonCompletedIndex : 0;
         setActiveStepIndex(startIndex);
+        activeStepIndexRef.current = startIndex;
+        isLoopRunningRef.current = false;
         
         if (drill.status === 'RUNNING') {
           setDrillRunning(true);
@@ -72,6 +94,8 @@ export default function AgentMonitor({
       lastDrillIdRef.current = null;
       setDrillRunning(false);
       setMockLogs([]);
+      logsRef.current = [];
+      isLoopRunningRef.current = false;
     }
   }, [drill?.id, drill?.status]);
 
@@ -99,28 +123,65 @@ export default function AgentMonitor({
   // The Orchestrated Agent Loop Engine
   useEffect(() => {
     if (drillRunning && drill) {
-      runAgentLoop();
+      const isAuthorized = currentUser?.role === 'Admin' || currentUser?.role === 'Operator';
+      if (isAuthorized) {
+        runAgentLoop();
+      } else {
+        setCycleProgressLog('Viewing active SRE drill execution. Awaiting telemetry updates from primary controller...');
+      }
     }
     return () => {
       if (executionLoopRef.current) clearTimeout(executionLoopRef.current);
     };
-  }, [drillRunning, activeStepIndex]);
+  }, [drillRunning, activeStepIndex, currentUser?.role]);
 
   const runAgentLoop = async () => {
-    if (!drill) return;
-    const currentSteps = [...drill.steps];
-    
-    // Check if we finished all steps
-    if (activeStepIndex >= currentSteps.length) {
-      await finishDrill(true);
+    const currentDrill = drillRef.current;
+    if (!currentDrill || !drillRunning) {
+      isLoopRunningRef.current = false;
       return;
     }
 
-    const currentStep = currentSteps[activeStepIndex];
+    if (isLoopRunningRef.current) return;
+    isLoopRunningRef.current = true;
+
+    // Use current active index tracked safely via ref
+    const currentIndex = activeStepIndexRef.current;
+    const currentSteps = [...currentDrill.steps];
+
+    // Safety Constraint: Ensure all prior steps are completed ('SUCCESS') before we execute this step.
+    // If there is an incomplete previous step, we must halt, correct our active index, and wait.
+    for (let i = 0; i < currentIndex; i++) {
+      if (currentSteps[i].status !== 'SUCCESS') {
+        appendLog(`[AGENT LOOP HALT] Step ${currentIndex + 1} ("${currentSteps[currentIndex]?.name || 'Unknown'}") cannot run because previous Step ${i + 1} ("${currentSteps[i].name}") is not completed yet (Current Status: "${currentSteps[i].status}").`);
+        
+        // Find the first non-completed step index
+        const firstIncompleteIdx = currentSteps.findIndex(
+          (step) => step.status !== 'SUCCESS' && step.status !== 'FAILURE'
+        );
+        const targetIndex = firstIncompleteIdx >= 0 ? firstIncompleteIdx : 0;
+        
+        appendLog(`[AGENT LOOP] Correcting execution index back to Step ${targetIndex + 1}.`);
+        activeStepIndexRef.current = targetIndex;
+        setActiveStepIndex(targetIndex);
+        
+        isLoopRunningRef.current = false;
+        return;
+      }
+    }
+    
+    // Check if we finished all steps
+    if (currentIndex >= currentSteps.length) {
+      await finishDrill(true);
+      isLoopRunningRef.current = false;
+      return;
+    }
+
+    const currentStep = { ...currentSteps[currentIndex] };
     currentStep.status = 'RUNNING';
     currentStep.startedAt = new Date().toISOString();
     
-    appendLog(`[AGENT LOOP] Starting Orchestration cycle for Step ${activeStepIndex + 1}: "${currentStep.name}"`);
+    appendLog(`[AGENT LOOP] Starting Orchestration cycle for Step ${currentIndex + 1}: "${currentStep.name}"`);
 
     // 1. OBSERVE Stage
     setAgentCycle('OBSERVE');
@@ -161,7 +222,7 @@ export default function AgentMonitor({
         body: JSON.stringify({
           toolName: currentStep.function,
           failSimulate: currentStep.function === 'failover_database' && forceFailStep3,
-          drillId: drill.id,
+          drillId: currentDrill.id,
           stepId: currentStep.id
         })
       });
@@ -207,6 +268,7 @@ export default function AgentMonitor({
       currentStep.error = stepError;
       
       await finishDrill(false);
+      isLoopRunningRef.current = false;
       return;
     }
 
@@ -229,44 +291,48 @@ export default function AgentMonitor({
     await delay(1000);
 
     // Save and sync state with backend
-    const nextSteps = [...currentSteps];
-    nextSteps[activeStepIndex] = currentStep;
+    const updatedSteps = [...currentSteps];
+    updatedSteps[currentIndex] = currentStep;
     
+    const latestDrill = drillRef.current || currentDrill;
     const updatedDrill: Drill = {
-      ...drill,
-      steps: nextSteps,
-      logs: [...mockLogs, `[STEP SUCCESS] Step ${activeStepIndex + 1} finalized. Elapsed: ${executionDuration}s.`].slice(-100)
+      ...latestDrill,
+      steps: updatedSteps,
+      logs: [...logsRef.current, `[STEP SUCCESS] Step ${currentIndex + 1} finalized. Elapsed: ${executionDuration}s.`].slice(-100)
     };
     
     await onDrillUpdate(updatedDrill);
     
-    // Increment to next step
-    setActiveStepIndex((prev) => prev + 1);
+    isLoopRunningRef.current = false;
+    // Increment to next step synchronously updating both ref and state to avoid any timing or batching race conditions
+    activeStepIndexRef.current = currentIndex + 1;
+    setActiveStepIndex(currentIndex + 1);
   };
 
   const finishDrill = async (success: boolean) => {
-    if (!drill) return;
+    const currentDrill = drillRef.current;
+    if (!currentDrill) return;
     setDrillRunning(false);
-    setAgentCycle(success ? 'REPORT' : 'IDLE');
-    setCycleProgressLog(success ? 'Generating Gemini audit reports...' : 'Drill terminated with errors.');
+    setAgentCycle('REPORT');
+    setCycleProgressLog(success ? 'Generating Gemini audit reports...' : 'Drill completed with failures/skipped steps. Compiling analytical report...');
 
     const finalStatus = success ? 'SUCCESS' : 'FAILURE';
     const finalLogs = [
-      ...mockLogs,
+      ...logsRef.current,
       `[STATE: REPORTING] Orchestration finished. Final status: ${finalStatus}.`,
       `[INFRA] Webhook alerts successfully dispatched to target DevOps integrations.`
     ];
 
-    const completedSteps = drill.steps.map((st, i) => {
+    const completedSteps = currentDrill.steps.map((st, i) => {
       // If we failed early, remaining pending steps are marked as skipped
-      if (!success && i >= activeStepIndex) {
-        return { ...st, status: i === activeStepIndex ? 'FAILURE' as const : 'SKIPPED' as const };
+      if (!success && i >= activeStepIndexRef.current) {
+        return { ...st, status: i === activeStepIndexRef.current ? 'FAILURE' as const : 'SKIPPED' as const };
       }
       return st;
     });
 
     const updatedDrill: Drill = {
-      ...drill,
+      ...currentDrill,
       status: finalStatus,
       agentState: success ? 'COMPLETED' : 'FAILED',
       steps: completedSteps,
@@ -275,9 +341,7 @@ export default function AgentMonitor({
     };
 
     await onDrillUpdate(updatedDrill);
-    if (success) {
-      await onGenerateReport(drill.id);
-    }
+    await onGenerateReport(currentDrill.id);
   };
 
   const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
@@ -285,7 +349,8 @@ export default function AgentMonitor({
   const appendLog = (msg: string) => {
     const timestamp = new Date().toISOString().split('T')[1].slice(0, 8);
     const line = `[${timestamp}Z] ${msg}`;
-    setMockLogs((prev) => [...prev, line]);
+    logsRef.current = [...logsRef.current, line].slice(-100);
+    setMockLogs([...logsRef.current]);
   };
 
   // Compute stats
@@ -311,7 +376,7 @@ export default function AgentMonitor({
           )}
         </div>
 
-        {drillRunning && (
+        {drillRunning && (currentUser?.role === 'Admin' || currentUser?.role === 'Operator') && (
           <div className="flex items-center gap-3">
             {/* Failure Injection Simulation Toggler */}
             <button

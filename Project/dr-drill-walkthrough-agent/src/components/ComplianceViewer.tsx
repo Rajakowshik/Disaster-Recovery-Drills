@@ -8,19 +8,211 @@ import {
   FileCheck, Shield, Award, AlertCircle, Copy, Check, Download, 
   Clock, BookOpen, AlertOctagon, Printer, CloudLightning, FileText 
 } from 'lucide-react';
-import { ComplianceReport, Drill } from '../types';
+import { ComplianceReport, Drill, User } from '../types';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from 'recharts';
 
 interface ComplianceViewerProps {
   report: ComplianceReport | null;
   selectedDrill: Drill | null;
   loading: boolean;
+  currentUser?: User | null;
 }
+
+const downloadFile = (content: string, fileName: string, contentType: string) => {
+  const blob = new Blob([content], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+const generateTextReport = (report: ComplianceReport) => {
+  let checklistStr = '';
+  report.auditorChecklist.forEach((item, index) => {
+    checklistStr += `[${item.passed ? 'PASSED' : 'FAILED'}] ${index + 1}. ${item.rule}\n   Evidence: ${item.evidence}\n\n`;
+  });
+
+  return `================================================================================
+                    DISASTER RECOVERY COMPLIANCE DRILL REPORT
+================================================================================
+Drill Title:              ${report.drillTitle}
+Audit Drill ID:           ${report.drillId}
+Executed Date:            ${new Date(report.createdAt).toLocaleString()}
+Compliance Status:        ${report.isCompliant ? 'FULLY COMPLIANT' : 'NON-COMPLIANT'}
+RTO SLA Target Met:       ${report.rtoCompliancePercent}%
+Total Steps Executed:     ${report.totalSteps}
+Passed Procedures:        ${report.passed} / ${report.totalSteps}
+RTO SLA Violations:       ${report.rtoViolations}
+Total SLA Duration:       ${report.totalDuration}s
+--------------------------------------------------------------------------------
+
+EXECUTIVE LEADERSHIP SUMMARY (CTO STATEMENT)
+============================================
+${report.executiveSummary}
+
+DBA & CLOUD SRE TECHNICAL LEDGER
+================================
+${report.technicalSummary}
+
+REGULATORY CERTIFICATIONS AUDIT CHECKLIST
+==========================================
+${checklistStr}--------------------------------------------------------------------------------
+This report is a dynamic compliance record. Automated verifications compiled 
+under continuous SRE testing pipelines.
+================================================================================`;
+};
+
+const generateHtmlReport = (report: ComplianceReport) => {
+  let checklistHtml = '';
+  report.auditorChecklist.forEach((item) => {
+    checklistHtml += `
+      <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; margin-bottom: 8px; background-color: #f8fafc;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+          <strong style="font-size: 14px; color: #1e293b;">${item.rule}</strong>
+          <span style="font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 4px; ${item.passed ? 'background-color: #d1fae5; color: #065f46;' : 'background-color: #fee2e2; color: #991b1b;'}">
+            ${item.passed ? 'PASSED' : 'FAILED'}
+          </span>
+        </div>
+        <p style="font-size: 12px; color: #64748b; margin: 0;">${item.evidence}</p>
+      </div>
+    `;
+  });
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Compliance Report - ${report.drillTitle}</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #1e293b;
+      line-height: 1.5;
+      padding: 40px;
+      max-width: 800px;
+      margin: 0 auto;
+      background-color: #ffffff;
+    }
+    .header {
+      border-bottom: 2px solid #3b82f6;
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+    .title {
+      font-size: 26px;
+      font-weight: 800;
+      color: #0f172a;
+      margin: 0;
+    }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 2fr 2fr;
+      gap: 16px;
+      background-color: #f1f5f9;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+    }
+    .meta-item {
+      font-size: 13px;
+    }
+    .meta-label {
+      font-weight: bold;
+      color: #64748b;
+    }
+    .badge {
+      font-weight: 800;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    .badge-compliant {
+      background-color: #d1fae5;
+      color: #065f46;
+    }
+    .badge-noncompliant {
+      background-color: #fee2e2;
+      color: #991b1b;
+    }
+    h2 {
+      font-size: 18px;
+      color: #0f172a;
+      border-left: 4px solid #3b82f6;
+      padding-left: 10px;
+      margin-top: 32px;
+      margin-bottom: 12px;
+    }
+    .section-box {
+      background-color: #fafafa;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 13.5px;
+      white-space: pre-wrap;
+    }
+    .footer {
+      border-top: 1px solid #e2e8f0;
+      margin-top: 48px;
+      padding-top: 16px;
+      text-align: center;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+    @media print {
+      body { padding: 0; }
+      .no-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <span style="font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: #3b82f6;">Compliance Audit record</span>
+      <span class="badge ${report.isCompliant ? 'badge-compliant' : 'badge-noncompliant'}">
+        ${report.isCompliant ? 'FULLY COMPLIANT' : 'NON-COMPLIANT'}
+      </span>
+    </div>
+    <h1 class="title">${report.drillTitle}</h1>
+    <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
+      Compiled on ${new Date(report.createdAt).toLocaleString()} • ID: ${report.drillId}
+    </div>
+  </div>
+
+  <div class="meta-grid">
+    <div class="meta-item"><span class="meta-label">Passed Procedures:</span> ${report.passed} / ${report.totalSteps}</div>
+    <div class="meta-item"><span class="meta-label">RTO SLA Guarantee:</span> ${report.rtoCompliancePercent}%</div>
+    <div class="meta-item"><span class="meta-label">Total SLA Duration:</span> ${report.totalDuration}s</div>
+    <div class="meta-item"><span class="meta-label">RTO SLA Violations:</span> ${report.rtoViolations}</div>
+  </div>
+
+  <h2>executive leadership summary (CTO statement)</h2>
+  <div class="section-box" style="font-family: inherit;">${report.executiveSummary}</div>
+
+  <h2>DBA & cloud SRE technical ledger</h2>
+  <div class="section-box" style="font-family: monospace; font-size: 12px;">${report.technicalSummary}</div>
+
+  <h2>compliance audit checklist</h2>
+  <div style="margin-top: 12px;">
+    ${checklistHtml}
+  </div>
+
+  <div class="footer">
+    This document was generated automatically by the SRE Drill Walkthrough Agent. CONFIDENTIAL - FOR INTERNAL USE ONLY.
+  </div>
+</body>
+</html>`;
+};
 
 export default function ComplianceViewer({
   report,
   selectedDrill,
-  loading
+  loading,
+  currentUser
 }: ComplianceViewerProps) {
   const [copied, setCopied] = useState(false);
 
@@ -30,6 +222,18 @@ export default function ComplianceViewer({
     navigator.clipboard.writeText(body);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDownloadTxt = () => {
+    if (!report) return;
+    const txtContent = generateTextReport(report);
+    downloadFile(txtContent, `compliance-report-${report.drillId}.txt`, 'text/plain;charset=utf-8');
+  };
+
+  const handleDownloadHtml = () => {
+    if (!report) return;
+    const htmlContent = generateHtmlReport(report);
+    downloadFile(htmlContent, `compliance-report-${report.drillId}.html`, 'text/html;charset=utf-8');
   };
 
   if (loading) {
@@ -77,7 +281,7 @@ export default function ComplianceViewer({
           </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={handleCopyText}
             className="bg-slate-950 border border-slate-850 hover:bg-slate-900 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer"
@@ -85,13 +289,33 @@ export default function ComplianceViewer({
             {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
             {copied ? 'Copied Ledger' : 'Copy Full Report'}
           </button>
-          
-          <button
-            onClick={() => window.print()}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 shadow-lg shadow-blue-600/10 cursor-pointer"
-          >
-            <Printer className="w-4 h-4" /> Print Form
-          </button>
+
+          {currentUser?.role === 'Viewer' ? (
+            <div className="text-[10px] bg-slate-950 border border-slate-850 text-slate-500 px-3 py-2 rounded-lg font-mono flex items-center gap-1.5">
+              🔒 DOWNLOAD_RESTRICTED (VIEWER PRIVILEGES)
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleDownloadTxt}
+                className="bg-slate-950 border border-slate-850 hover:bg-slate-900 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer"
+                title="Download report as plain text"
+              >
+                <FileText className="w-4 h-4 text-slate-400" />
+                <span>Download (.txt)</span>
+              </button>
+              
+              <button
+                type="button"
+                onClick={handleDownloadHtml}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 shadow-lg shadow-blue-600/10 cursor-pointer"
+                title="Generate and download formatted HTML report ready to print or view"
+              >
+                <Printer className="w-4 h-4" /> Print Form
+              </button>
+            </>
+          )}
         </div>
       </div>
 
